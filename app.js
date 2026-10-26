@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.8.3';
+const VERSION = '1.9.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -597,7 +597,7 @@ function pruneEmpty() {
   if (topics.length !== before) saveTopics();
 }
 function showHome() {
-  stopPlayer(); stopListening(); stopLive(); cur = null; pruneEmpty();
+  stopPlayer(); stopListening(); stopLive(); stopPodcast(); cur = null; pruneEmpty();
   $('#home').hidden = false; $('#topic').hidden = true; $('#backBtn').hidden = true; $('#title').textContent = 'Leksehjelp';
   renderTopics();
 }
@@ -609,14 +609,16 @@ function openTopic(t, tab = 'material') {
   $('#lectureOut').innerHTML = cur.cache.lecture ? md(cur.cache.lecture) : '';
   $('#summaryOut').innerHTML = cur.cache.summary ? md(cur.cache.summary) : '';
   $('#checkOut').innerHTML = cur.cache.check || '';
+  stopPodcast(); $('#podOut').hidden = true; $('#podScript').innerHTML = '';
   switchTab(tab); scrollTo(0, 0);
 }
 function switchTab(name) {
-  stopPlayer(); stopListening(); if (name !== 'chat') stopLive(); $('#newMsgBtn').hidden = true;
+  stopPlayer(); stopListening(); if (name !== 'chat') stopLive(); if (pod.mode === 'device' && name !== 'podcast') stopPodcast(); $('#newMsgBtn').hidden = true;
   $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(p => p.hidden = p.dataset.pane !== name);
   if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først'); }
   if (name === 'quiz' && cur?.sources.length) prefetchQuiz();
+  if (name === 'chat' && cur?.sources.length && !cur.cache?.suggest) renderSuggestions();
   if (name === 'quiz') $('#quizHint').textContent = hasKey() ? '' : 'Uten AI-nøkkel lages enkle «fyll inn ordet»-spørsmål.';
 }
 function renderTopics() {
@@ -679,7 +681,8 @@ document.addEventListener('click', e => { const m = e.target.closest('.msg.bot')
 function renderChat() {
   $('#chatLog').innerHTML = '';
   if (!cur.chat.length) addMsg('sys', hasKey() ? 'Trykk på den store knappen for å snakke fritt med appen – som Gemini Live. Du kan også skrive under. Si «snakk engelsk» for å bytte språk.' : 'Uten AI-nøkkel finner appen setningene i stoffet som passer best til spørsmålet ditt.');
-  cur.chat.forEach(m => addMsg(m.role === 'user' ? 'user' : 'bot', m.text));
+  cur.chat.forEach(m => { if (!m.hidden) addMsg(m.role === 'user' ? 'user' : 'bot', m.text); });
+  renderSuggestions();
 }
 function detectLangSwitch(t) {
   const s = t.toLowerCase();
@@ -688,18 +691,19 @@ function detectLangSwitch(t) {
   return null;
 }
 let chatBusy = false;
-async function sendChat(text) {
+async function sendChat(text, { hidden = false } = {}) {
   text = text.trim(); if (!text) return;
   if (live.on && live.setupDone && live.ws?.readyState === 1) {
-    $('#chatInput').value = ''; if (live.botB) flushBot(); stopPlayback();
-    addMsg('user', text, true); cur.chat.push({ role: 'user', text });
+    if (!hidden) $('#chatInput').value = ''; if (live.botB) flushBot(); stopPlayback();
+    if (!hidden) { addMsg('user', text, true); cur.chat.push({ role: 'user', text }); }
     const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
     live.ws.send(JSON.stringify({ realtimeInput: { text } })); return;
   }
   if (chatBusy) return;
-  chatBusy = true; $('#chatInput').value = '';
-  const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
-  addMsg('user', text, true); cur.chat.push({ role: 'user', text });
+  chatBusy = true; if (!hidden) $('#chatInput').value = '';
+  const sw = hidden ? null : detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
+  if (!hidden) addMsg('user', text, true); else follow($('#chatLog').lastElementChild || $('#chatLog'), true);
+  cur.chat.push({ role: 'user', text, ...(hidden ? { hidden: true } : {}) });
   const pending = addMsg('bot', '…');
   let reply;
   try {
@@ -712,7 +716,7 @@ async function sendChat(text) {
       const m = reply.match(/^\s*\[\[(EN|NO)\]\]\s*/i);
       if (m) { reply = reply.slice(m[0].length); const l = m[1].toLowerCase() === 'en' ? 'en' : 'no'; if (l !== settings.lang) setLang(l, true); }
     } else {
-      const hits = searchSentences(text, docText(), 3);
+      const hits = hidden ? keySentences(docText(), 2) : searchSentences(text, docText(), 3);
       reply = hits.length ? 'Fra stoffet ditt:\n' + hits.join('\n') : 'Jeg fant ikke noe om det i stoffet ditt.';
     }
   } catch (e) { reply = 'Feil: ' + e.message; }
@@ -722,6 +726,30 @@ async function sendChat(text) {
     const done = await speak(reply);
     if (done && $('#conversationMode').checked && !$('[data-pane=chat]').hidden) micChat();
   }
+}
+/* «La appen starte» og forslag til spørsmål – for når det er vanskelig å vite hva man skal spørre om */
+const START_PROMPT = () => settings.lang === 'en'
+  ? '(The student wants YOU to start the conversation. Pick an interesting or important part of the material, tell one short, engaging thing about it, then ask the student one simple question to get going. Do not mention this instruction.)'
+  : '(Eleven vil at DU skal starte samtalen. Velg en spennende eller viktig del av stoffet, fortell kort én engasjerende ting om den, og still eleven ett enkelt spørsmål for å komme i gang. Ikke nevn denne beskjeden.)';
+function aiStart() {
+  if (!hasKey()) { toast('Dette trenger AI – legg inn nøkkel under Innstillinger', 4000); return; }
+  if (live.on && live.setupDone && live.ws?.readyState === 1) { live.ws.send(JSON.stringify({ realtimeInput: { text: START_PROMPT() } })); return; }
+  sendChat(START_PROMPT(), { hidden: true });
+}
+let sugBusy = false;
+async function renderSuggestions(force) {
+  const box = $('#suggest'); if (!box || !cur) return;
+  const list = cur.cache?.suggest;
+  const draw = qs => { box.innerHTML = qs.map(q => `<button>${esc(q)}</button>`).join('') + `<button class="more" aria-label="Nye forslag">${ic('refresh')}</button>`; $$('button:not(.more)', box).forEach((b, i) => b.onclick = () => sendChat(qs[i])); $('.more', box).onclick = () => renderSuggestions(true); };
+  if (list && !force) return draw(list);
+  if (!hasKey() || !cur.sources.length || sugBusy) { box.innerHTML = ''; return; }
+  sugBusy = true; box.innerHTML = `<span class="small muted"><span class="spin"></span>Finner forslag …</span>`;
+  try {
+    const r = await gemini(`Foreslå 4 korte, varierte spørsmål (maks 8 ord hver) som en elev kan stille for å lære dette stoffet. Bland enkle «hva/hvem/når»-spørsmål med «hvorfor/hvordan»-spørsmål. Spørsmålene skal kunne besvares ut fra stoffet. ${settings.lang === 'en' ? 'Write them in English.' : 'Skriv på norsk bokmål.'} JSON: {"questions":["…"]}`, { system: groundRules(), json: true, temp: 0.9, fast: true, lite: true });
+    const qs = (r.questions || r || []).filter(x => typeof x === 'string').slice(0, 4);
+    cur.cache ||= {}; cur.cache.suggest = qs; saveTopics(); draw(qs);
+  } catch { box.innerHTML = ''; }
+  sugBusy = false;
 }
 async function micChat() {
   const btn = $('#micBtn');
@@ -750,7 +778,7 @@ function setLiveState(state, text) {
 }
 function liveSystem() {
   const doc = docText(); const capped = doc.length > 150000 ? doc.slice(0, 150000) + '\n[…forkortet…]' : doc;
-  const recent = cur.chat.slice(-12).map(m => (m.role === 'user' ? 'Eleven: ' : 'Du: ') + m.text).join('\n');
+  const recent = cur.chat.filter(m => !m.hidden).slice(-12).map(m => (m.role === 'user' ? 'Eleven: ' : 'Du: ') + m.text).join('\n');
   return `Du er Leksehjelp, en varm, tålmodig og engasjert studiehjelper i en LIVE muntlig samtale med en elev om temaet «${cur.name || 'temaet'}».
 SPRÅK: Snakk norsk bokmål med naturlig norsk uttale. Hvis eleven ber deg snakke engelsk, bytt til engelsk og fortsett på engelsk til eleven ber om norsk igjen.
 ${levelRule()}${level() <= 2 ? ' Snakk rolig og tydelig med små pauser. Still bare ett enkelt spørsmål om gangen. Ros innsats, og hvis eleven svarer feil: si det vennlig og hjelp eleven videre med et hint.' : ''} Hvis eleven ber deg forklare enklere eller mer avansert, juster deg etter det.
@@ -1150,6 +1178,200 @@ function finishQuiz() {
   $('#qNew').onclick = resetQuiz;
 }
 
+
+/* ---------- podcast ---------- */
+const POD_HOST = { name: 'Ida', voice: 'Aoede' }, POD_GUEST = { name: 'Martin', voice: 'Charon' };
+const pod = { lines: [], segs: [], segIdx: 0, done: false, token: 0, mode: 'ai', urls: [], fullUrl: null, ttsModels: null };
+async function pickTtsModels() {
+  if (pod.ttsModels) return pod.ttsModels;
+  const fb = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'];
+  try {
+    const ver = n => { const v = n.match(/gemini-(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
+    const l = (await fetchModelList()).map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini/.test(n) && /tts/.test(n))
+      .sort((a, b) => ver(b) - ver(a) || (/lite/.test(a) ? 1 : 0) - (/lite/.test(b) ? 1 : 0) || (/preview/.test(a) ? 1 : 0) - (/preview/.test(b) ? 1 : 0));
+    return (pod.ttsModels = l.length ? l.slice(0, 3) : fb);
+  } catch { return (pod.ttsModels = fb); }
+}
+function b64ToBytes(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function pcmOf(bytes, mime) { // gir rå 16-bit PCM og samplerate, uansett om svaret er WAV eller rå PCM
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+    const dv = new DataView(bytes.buffer); let rate = dv.getUint32(24, true), off = 12;
+    while (off < bytes.length - 8) { const id = String.fromCharCode(...bytes.slice(off, off + 4)), sz = dv.getUint32(off + 4, true); if (id === 'data') return { pcm: bytes.slice(off + 8, off + 8 + sz), rate }; off += 8 + sz + (sz & 1); }
+    return { pcm: bytes.slice(44), rate };
+  }
+  return { pcm: bytes, rate: +((mime || '').match(/rate=(\d+)/) || [0, 24000])[1] };
+}
+function wavBlob(chunks, rate) {
+  const len = chunks.reduce((a, c) => a + c.length, 0), buf = new ArrayBuffer(44 + len), dv = new DataView(buf), u = new Uint8Array(buf);
+  const w = (o, t) => { for (let i = 0; i < t.length; i++) u[o + i] = t.charCodeAt(i); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + len, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, len, true);
+  let o = 44; for (const c of chunks) { u.set(c, o); o += c.length; }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+async function ttsSegment(lines, dialog) {
+  const style = settings.lang === 'en' ? 'a relaxed, warm and enthusiastic podcast conversation in English' : 'en avslappet, varm og engasjert podcast på norsk bokmål, med naturlig norsk uttale';
+  const speakers = dialog ? [POD_HOST, POD_GUEST] : [POD_HOST];
+  const speechConfig = dialog
+    ? { multiSpeakerVoiceConfig: { speakerVoiceConfigs: speakers.map(p => ({ speaker: p.name, voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voice } } })) } }
+    : { voiceConfig: { prebuiltVoiceConfig: { voiceName: POD_HOST.voice } } };
+  const plain = `Les dette som ${style}:\n` + lines.map(l => `${l.who}: ${l.text}`).join('\n');
+  const bodies = [
+    { contents: [{ role: 'user', parts: lines.map(l => ({ text: l.text, speech_metadata: { ...(dialog ? { speaker: l.who } : {}), style: settings.lang === 'en' ? 'relaxed, warm podcast host' : 'avslappet og engasjert podcast-stemme' } })) }] },
+    { contents: [{ role: 'user', parts: [{ text: plain }] }] },
+  ];
+  let lastErr;
+  for (const m of await pickTtsModels()) {
+    for (const b of bodies) {
+      const body = { ...b, generationConfig: { responseModalities: ['AUDIO'], speechConfig } };
+      const direct = !!settings.apiKey;
+      const r = await fetch(direct ? `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent` : `${PROXY}/gemini/${m}`, { method: 'POST', headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
+      if (!r) { lastErr = new Error('Ingen nettforbindelse'); break; }
+      if (r.ok) {
+        const d = await r.json(); const p = (d.candidates?.[0]?.content?.parts || []).find(x => x.inlineData?.data);
+        if (p) return pcmOf(b64ToBytes(p.inlineData.data), p.inlineData.mimeType);
+        lastErr = new Error('Fikk ikke lyd tilbake'); continue;
+      }
+      let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
+      lastErr = new Error(r.status === 429 ? 'Gratiskvoten for AI-stemmer er brukt opp for nå' : msg || 'TTS-feil ' + r.status);
+      if (r.status === 400) continue; // prøv det enkle formatet
+      break; // 404/429/5xx → neste modell
+    }
+  }
+  throw lastErr || new Error('AI-stemmene er ikke tilgjengelige');
+}
+function parsePodLine(l) {
+  const m = l.match(/^\s*\**\s*(IDA|MARTIN|Ida|Martin|VERT|GJEST|HOST|GUEST)\s*\**\s*[:：]\s*(.+)$/);
+  if (!m) return null; const w = m[1].toLowerCase();
+  return { who: /martin|gjest|guest/.test(w) ? POD_GUEST.name : POD_HOST.name, text: m[2].replace(/\*+/g, '').trim() };
+}
+function renderPodLine(l, i) {
+  const d = document.createElement('div'); d.className = 'podline ' + (l.who === POD_GUEST.name ? 'guest' : 'host'); d.dataset.i = i;
+  d.innerHTML = `<b>${esc(l.who)}</b><span>${esc(l.text)}</span>`; $('#podScript').appendChild(d);
+}
+function podStatus(t) { $('#podStatus').innerHTML = t || ''; $('#podStatus').hidden = !t; }
+function stopPodcast() {
+  pod.token++; const a = $('#podAudio'); if (a) { a.pause(); }
+  if (pod.mode === 'device') stopSpeaking();
+}
+async function makePodcast() {
+  stopPodcast(); stopPlayer();
+  const my = ++pod.token, dialog = segVal('podFormat') === 'dialog', len = segVal('podLen');
+  pod._scriptDone = false; pod.mode = segVal('podVoices'); pod.lines = []; pod.segs = []; pod.segIdx = 0; pod.done = false;
+  pod.urls.forEach(u => URL.revokeObjectURL(u)); pod.urls = []; if (pod.fullUrl) URL.revokeObjectURL(pod.fullUrl); pod.fullUrl = null;
+  $('#podOut').hidden = false; $('#podScript').innerHTML = ''; $('#podDl').hidden = true;
+  const audio = $('#podAudio'); audio.hidden = pod.mode !== 'ai'; pod.waiting = true; pod._devStarted = false;
+  // «Lås opp» lydspilleren mens vi fortsatt er i trykket (kreves på iPhone for å spille av senere)
+  if (pod.unlockUrl) URL.revokeObjectURL(pod.unlockUrl);
+  pod.unlockUrl = URL.createObjectURL(wavBlob([new Uint8Array(2400)], 24000)); audio.src = pod.unlockUrl; audio.play().catch(() => { });
+  podStatus('<span class="spin"></span>Skriver manus …');
+  if (!hasKey()) { podStatus('Podcast trenger AI – legg inn nøkkel under Innstillinger.'); return; }
+  const words = { kort: 350, middels: 800, lang: 1500 }[len];
+  const prompt = dialog
+    ? `Skriv manus til en podcast-episode på ca. ${words} ord der programlederen ${POD_HOST.name} intervjuer eksperten ${POD_GUEST.name} om studiestoffet.
+${POD_HOST.name} er nysgjerrig og stiller spørsmål slik en elev kunne gjort, oppsummerer innimellom og reagerer naturlig («Å ja!», «Vent, så det betyr …»). ${POD_GUEST.name} forklarer engasjert med eksempler og sammenligninger. Korte, levende replikker som veksler ofte – som en ekte samtale. Start med en kort, fengende intro og avslutt med de 3 viktigste tingene å huske.`
+    : `Skriv manus til en uformell podcast-episode på ca. ${words} ord der programlederen ${POD_HOST.name} snakker alene om studiestoffet – avslappet og personlig, som til en venn. Bruk muntlig språk, retoriske spørsmål, eksempler, sammenligninger og gjerne litt humor. Start med en fengende intro og avslutt med de 3 viktigste tingene å huske. Del teksten i korte avsnitt.`;
+  const fmt = `\nBruk KUN fakta fra stoffet. Ingen lydeffekter, scenebeskrivelser, overskrifter eller markdown.
+FORMAT: Hver replikk/avsnitt på egen linje som starter med navnet og kolon, f.eks.:
+${POD_HOST.name}: …${dialog ? `\n${POD_GUEST.name}: …` : `\n${POD_HOST.name}: …`}`;
+  // Lyd lages bit for bit: første bit så snart de første replikkene er skrevet
+  const firstN = dialog ? 3 : 2, restN = dialog ? 10 : 5;
+  let consumed = 0, scriptDone = false, wake = null;
+  const poke = () => { const w = wake; wake = null; w?.(); };
+  const genAudio = (async () => {
+    if (pod.mode !== 'ai') return;
+    for (;;) {
+      if (my !== pod.token) return;
+      const need = consumed === 0 ? firstN : restN;
+      if (pod.lines.length - consumed < need && !scriptDone) { await new Promise(r => wake = r); continue; }
+      if (consumed >= pod.lines.length) break;
+      const seg = pod.lines.slice(consumed, consumed + need); const from = consumed; consumed += seg.length;
+      try {
+        const a = await ttsSegment(seg, dialog); if (my !== pod.token) return;
+        pod.segs.push({ ...a, from, to: consumed - 1 }); podAudioReady();
+      } catch (e) {
+        if (my !== pod.token) return;
+        toast(e.message + ' – bruker telefonens stemmer i stedet', 5000);
+        pod.mode = 'device'; pod._devStarted = true; audio.hidden = true; podStatus(''); podDevicePlay(pod.segs.length ? pod.segs[pod.segs.length - 1].to + 1 : 0); return;
+      }
+    }
+    pod.done = true; podAudioReady(); podFinish();
+  })();
+  let seen = 0;
+  try {
+    await gemini(prompt + fmt, {
+      system: groundRules(), temp: 0.9, fast: true,
+      onText: full => {
+        if (my !== pod.token) return;
+        const ls = full.split('\n');
+        for (; seen < ls.length - 1; seen++) { const l = parsePodLine(ls[seen]); if (l) { pod.lines.push(l); renderPodLine(l, pod.lines.length - 1); } }
+        if (pod.mode === 'ai' && pod.lines.length && !pod.segs.length) podStatus('<span class="spin"></span>Lager stemmene …');
+        if (pod.mode === 'device' && pod.lines.length && !pod._devStarted) { pod._devStarted = true; podStatus(''); podDevicePlay(0); }
+        poke();
+      },
+    }).then(full => { const ls = full.split('\n'); for (; seen < ls.length; seen++) { const l = parsePodLine(ls[seen]); if (l) { pod.lines.push(l); renderPodLine(l, pod.lines.length - 1); } } });
+  } catch (e) { if (my === pod.token) podStatus(`${ic('error')} ${esc(e.message)}`); return; }
+  scriptDone = true; pod._scriptDone = true; poke();
+  if (my !== pod.token) return;
+  if (!pod.lines.length) { podStatus('Fikk ikke laget manus – prøv igjen.'); return; }
+  cur.cache ||= {}; cur.cache.podcast = { dialog, lines: pod.lines }; saveTopics();
+  if (pod.mode === 'device' && !pod._devStarted) { pod._devStarted = true; podStatus(''); podDevicePlay(0); }
+  await genAudio;
+}
+function podAudioReady() {
+  const a = $('#podAudio');
+  if (pod.waiting && pod.segs[pod.segIdx]) { pod.waiting = false; playSeg(pod.segIdx); podStatus(pod.done ? '' : '<span class="spin"></span>Lager resten mens du hører …'); }
+}
+function playSeg(i) {
+  const a = $('#podAudio'), s = pod.segs[i]; if (!s) return;
+  pod.segIdx = i; const url = URL.createObjectURL(wavBlob([s.pcm], s.rate)); pod.urls.push(url);
+  a.src = url; a.play().catch(() => { });
+  highlightPod(s.from, s.to);
+}
+function highlightPod(from, to) {
+  $$('.podline').forEach(d => d.classList.toggle('speaking', +d.dataset.i >= from && +d.dataset.i <= to));
+  const el = $(`.podline[data-i="${from}"]`); if (el && !touching && Date.now() - lastUserInput > 5000) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+function podFinish() {
+  if (!pod.segs.length) return;
+  const rate = pod.segs[0].rate; const blob = wavBlob(pod.segs.map(s => s.pcm), rate);
+  pod.fullUrl = URL.createObjectURL(blob);
+  const dl = $('#podDl'); dl.href = pod.fullUrl; dl.download = `Podcast – ${(cur?.name || 'tema').replace(/[\\/:*?"<>|]/g, '')}.wav`; dl.hidden = false;
+  podStatus('');
+}
+function onPodEnded() {
+  const a = $('#podAudio');
+  if (a.src === pod.unlockUrl) return;
+  if (a.src === pod.fullUrl) { $$('.podline').forEach(d => d.classList.remove('speaking')); return; }
+  if (pod.segs[pod.segIdx + 1]) playSeg(pod.segIdx + 1);
+  else if (!pod.done) { pod.waiting = true; pod.segIdx++; podStatus('<span class="spin"></span>Lager neste del …'); }
+  else {
+    $$('.podline').forEach(d => d.classList.remove('speaking'));
+    // Bytt til hele episoden i én fil, så man kan spole fritt
+    if (pod.fullUrl) { a.src = pod.fullUrl; a.load(); }
+  }
+}
+/* Reserve: telefonens egne stemmer – to ulike stemmer hvis mulig, ellers ulik tonehøyde */
+async function podDevicePlay(start) {
+  const my = pod.token; pod.mode = 'device';
+  const pref = LANG[settings.lang].voice; const vs = voices.filter(v => pref.some(p => v.lang.toLowerCase().startsWith(p)));
+  const hostV = pickVoice(settings.lang), guestV = vs.find(v => v !== hostV) || hostV;
+  for (let i = start; ; i++) {
+    while (i >= pod.lines.length) { if (my !== pod.token || pod._scriptDone) { if (i >= pod.lines.length) { $$('.podline').forEach(d => d.classList.remove('speaking')); return; } } await sleep(300); }
+    if (my !== pod.token) return;
+    const l = pod.lines[i]; highlightPod(i, i);
+    const guest = l.who === POD_GUEST.name;
+    const ok = await new Promise(res => {
+      const chunks = chunkForSpeech(l.text); let k = 0;
+      const next = () => { if (my !== pod.token) return res(false); if (k >= chunks.length) return res(true);
+        const u = new SpeechSynthesisUtterance(chunks[k++]); const v = guest ? guestV : hostV; if (v) u.voice = v; u.lang = v?.lang || LANG[settings.lang].sr;
+        u.pitch = guest && guestV === hostV ? 0.8 : guest ? 1 : 1.12; u.rate = (+$('#podRate').value || 1) * LEVELS[level()].slow; u.onend = next; u.onerror = next; speechSynthesis.speak(u); };
+      next();
+    });
+    if (!ok) return;
+  }
+}
+
 /* ---------- foredrag og sammendrag ---------- */
 async function makeLecture() {
   const out = $('#lectureOut'), len = segVal('lectureLen');
@@ -1328,11 +1550,16 @@ $('#pasteSave').onclick = () => {
 $('#sendBtn').onclick = () => sendChat($('#chatInput').value);
 $('#chatInput').onkeydown = e => { if (e.key === 'Enter') sendChat($('#chatInput').value); };
 $('#micBtn').onclick = micChat;
+$('#aiStartBtn').onclick = aiStart;
 $('#startQuiz').onclick = () => startQuiz();
 function syncGameToggles() { $('#gameMode').checked = !!settings.gameMode; $('#gameSound').checked = !!settings.gameSound; $('#gameSound').disabled = !settings.gameMode; }
 $('#gameMode').onchange = () => { settings.gameMode = $('#gameMode').checked; saveSettings(); syncGameToggles(); };
 $('#gameSound').onchange = () => { settings.gameSound = $('#gameSound').checked; saveSettings(); if (settings.gameSound) sfx('right'); };
 $('#makeLecture').onclick = makeLecture;
+$('#makePodcast').onclick = makePodcast;
+$('#podAudio').addEventListener('ended', onPodEnded);
+$('#podRate').onchange = () => { $('#podAudio').playbackRate = +$('#podRate').value; };
+$('#podAudio').addEventListener('play', () => { $('#podAudio').playbackRate = +$('#podRate').value; });
 $('#makeSummary').onclick = makeSummary;
 $('#runCheck').onclick = runCheck;
 

@@ -269,3 +269,24 @@ dialog::backdrop{background:rgba(10,14,22,.5);backdrop-filter:blur(3px)}
 .switch input:checked+.sw::after{transform:translateX(18px)}
 .switch input:disabled~span{opacity:.45}
 .switch input:focus-visible+.sw{box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 30%,transparent)}
+
+/* Samtalestart og forslag */
+.starters{margin:0 0 14px}
+.chips.sug{margin:0}
+.chips.sug button{text-align:left;font-weight:500;color:var(--ink);background:var(--surface);box-shadow:var(--sh-1)}
+.chips.sug button.more{color:var(--muted);padding:6px 9px}
+.chips.sug button.more .ms{font-size:18px}
+/* Podcast */
+.podout{margin-top:16px}
+.podplayer{position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;box-shadow:var(--sh-2);display:grid;gap:8px}
+.podplayer audio{width:100%;height:44px}
+.podplayer .row{justify-content:space-between}
+.podplayer select{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:3px 6px;margin-left:4px}
+.podscript{display:grid;gap:8px;margin-top:14px}
+.podline{display:grid;gap:2px;padding:10px 14px;border-radius:16px;max-width:90%;background:var(--surface);border:1px solid var(--line);transition:background .2s,box-shadow .2s}
+.podline b{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+.podline.host{justify-self:start;border-bottom-left-radius:6px}.podline.host b{color:var(--brand)}
+.podline.guest{justify-self:end;border-bottom-right-radius:6px;background:var(--brand-soft);border-color:transparent}.podline.guest b{color:#b86d10}
+@media (prefers-color-scheme: dark){.podline.guest b{color:var(--accent)}}
+.podline.speaking{box-shadow:0 0 0 2px var(--accent)}
+a.btn{text-decoration:none}

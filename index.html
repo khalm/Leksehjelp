@@ -13,8 +13,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=add,arrow_back,arrow_downward,auto_stories,cancel,check_circle,close,co_present,content_copy,content_paste,delete,description,download,edit,edit_note,emoji_events,error,fact_check,forum,lightbulb,link,local_fire_department,mic,open_in_new,pause,photo_camera,play_arrow,quiz,record_voice_over,replay,search,send,skip_next,skip_previous,sports_esports,stars,stop,summarize,translate,travel_explore,tune,upload_file,volume_up&display=block">
-<link rel="stylesheet" href="style.css?v=1.8.3">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=add,arrow_back,arrow_downward,auto_awesome,auto_stories,cancel,check_circle,close,co_present,content_copy,content_paste,delete,description,download,edit,edit_note,emoji_events,error,fact_check,forum,groups,lightbulb,link,local_fire_department,mic,open_in_new,pause,person,photo_camera,play_arrow,podcasts,quiz,record_voice_over,refresh,replay,search,send,skip_next,skip_previous,smartphone,sports_esports,stars,stop,summarize,translate,travel_explore,tune,upload_file,volume_up&display=block">
+<link rel="stylesheet" href="style.css?v=1.9.0">
 </head>
 <body>
 <header class="topbar">
@@ -62,6 +62,7 @@
     <button data-tab="chat"><span class="ms">forum</span>Snakk</button>
     <button data-tab="quiz"><span class="ms">quiz</span>Quiz</button>
     <button data-tab="lecture"><span class="ms">co_present</span>Foredrag</button>
+    <button data-tab="podcast"><span class="ms">podcasts</span>Podcast</button>
     <button data-tab="summary"><span class="ms">summarize</span>Sammendrag</button>
     <button data-tab="check"><span class="ms">fact_check</span>Sjekk</button>
   </nav>
@@ -119,6 +120,11 @@
       <div id="liveStatus" class="livestatus">Trykk for å starte live-samtale</div>
       <button id="liveStop" class="btn ghost small" hidden><span class="ms">stop</span> Avslutt samtalen</button>
       <label class="toggle"><input type="checkbox" id="liveHalfDuplex"> Ikke avbryt (demp mikrofonen mens appen snakker – nyttig uten hodetelefoner)</label>
+    </div>
+    <div class="starters">
+      <button id="aiStartBtn" class="btn small"><span class="ms">auto_awesome</span> La appen starte samtalen</button>
+      <p class="small muted" style="margin:10px 0 6px">Eller trykk på et forslag:</p>
+      <div id="suggest" class="chips sug"></div>
     </div>
     <div id="chatLog" class="chatlog"></div>
     <button id="newMsgBtn" class="newmsg" hidden><span class="ms">arrow_downward</span> Nye meldinger</button>
@@ -181,6 +187,41 @@
       <button id="makeLecture" class="btn primary wide"><span class="ms">co_present</span> Lag foredrag</button>
     </div>
     <div id="lectureOut" class="readout"></div>
+  </div>
+
+  <!-- Podcast -->
+  <div class="tab" data-pane="podcast" hidden>
+    <div class="card">
+      <p class="label">Format</p>
+      <div class="seg" data-name="podFormat">
+        <button data-v="solo" class="on"><span class="ms">person</span>Én vert</button>
+        <button data-v="dialog"><span class="ms">groups</span>Intervju</button>
+      </div>
+      <p class="small muted" style="margin:8px 2px 0">Én vert: programlederen Ida snakker uformelt om temaet. Intervju: Ida intervjuer eksperten Martin – Ida har sin stemme og Martin har sin.</p>
+      <p class="label">Lengde</p>
+      <div class="seg" data-name="podLen">
+        <button data-v="kort">Kort · 2 min</button>
+        <button data-v="middels" class="on">Middels · 5 min</button>
+        <button data-v="lang">Lang · 10 min</button>
+      </div>
+      <p class="label">Stemmer</p>
+      <div class="seg" data-name="podVoices">
+        <button data-v="ai" class="on"><span class="ms">auto_awesome</span>AI-stemmer</button>
+        <button data-v="device"><span class="ms">smartphone</span>Telefonens</button>
+      </div>
+      <button id="makePodcast" class="btn primary wide"><span class="ms">podcasts</span> Lag podcast</button>
+    </div>
+    <div id="podOut" class="podout" hidden>
+      <div class="podplayer">
+        <audio id="podAudio" controls preload="auto"></audio>
+        <div class="row">
+          <label class="small muted">Fart <select id="podRate"><option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option><option value="1.5">1.5×</option></select></label>
+          <a id="podDl" class="btn ghost small" hidden><span class="ms">download</span> Last ned</a>
+        </div>
+      </div>
+      <div id="podStatus" class="status" hidden></div>
+      <div id="podScript" class="podscript"></div>
+    </div>
   </div>
 
   <!-- Sammendrag -->
@@ -272,7 +313,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.8.3"></script>
-<script src="app.js?v=1.8.3"></script>
+<script src="config.js?v=1.9.0"></script>
+<script src="app.js?v=1.9.0"></script>
 </body>
 </html>
