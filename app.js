@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -37,7 +37,7 @@ const store = (() => {
   return { get, set };
 })();
 
-const settings = { apiKey: '', model: '', voice: '', lang: 'no' };
+const settings = { apiKey: '', model: '', voice: '', lang: 'no', level: 4, levelScale: 6, textSize: 1, font: '', autoRead: false };
 let topics = [];
 let cur = null; // gjeldende tema
 const PROXY = (window.LEKSEHJELP_PROXY || '').replace(/\/$/, '');
@@ -45,6 +45,7 @@ const hasKey = () => !!settings.apiKey || !!PROXY;
 
 async function loadAll() {
   Object.assign(settings, (await store.get('settings')) || {});
+  if (settings.levelScale !== 6) { settings.level = Math.min(6, (+settings.level || 3) + 1); settings.levelScale = 6; }
   topics = (await store.get('topics')) || [];
 }
 const saveSettings = () => store.set('settings', { ...settings });
@@ -151,13 +152,15 @@ function docText(t = cur) {
 }
 const LEVELS = [
   null,
-  { name: 'Veldig enkelt', rule: 'SPRÅKNIVÅ 1/5 – VELDIG ENKELT: Forklar som til et barn på 10 år. Bruk korte setninger og vanlige hverdagsord. Unngå fagord – må du bruke ett, forklar det med enkle ord med en gang. Bruk gjerne sammenligninger og eksempler fra hverdagen. Ta bare med det viktigste.' },
-  { name: 'Enkelt', rule: 'SPRÅKNIVÅ 2/5 – ENKELT: Forklar som til en elev på ungdomsskolen. Korte, tydelige setninger. Fagord kan brukes, men forklar dem kort første gang.' },
-  { name: 'Normalt', rule: 'SPRÅKNIVÅ 3/5 – NORMALT: Vanlig, klart språk som passer for videregående skole. Bruk fagbegrepene fra stoffet og forklar dem når det trengs.' },
-  { name: 'Presist', rule: 'SPRÅKNIVÅ 4/5 – PRESIST: Bruk et presist og faglig språk med riktige fagbegreper uten å forenkle. Ta med detaljer, nyanser og sammenhenger fra stoffet. Forklar bare de mest krevende begrepene.' },
-  { name: 'Avansert', rule: 'SPRÅKNIVÅ 5/5 – AVANSERT: Bruk et akademisk, presist og nyansert språk som på universitetsnivå. Bruk fagterminologi fritt og et rikt ordforråd, og vær nøyaktig med presiseringer, forbehold og sammenhenger i stoffet.' },
+  { name: '3. klasse', short: '3. kl', rule: 'SPRÅKNIVÅ 1/6 – FOR ET BARN I 3. KLASSE (ca. 8 år), som kan ha lærevansker (f.eks. dysleksi, konsentrasjonsvansker eller språkvansker): Bruk svært korte setninger med bare én ting i hver setning. Bruk bare vanlige, enkle ord barn kjenner. Ingen fremmedord – må et ord fra stoffet brukes, forklar det med en gang med enkle ord. Ta én ting om gangen og bare det aller viktigste. Gjenta det viktigste. Bruk konkrete eksempler barnet kjenner fra hverdagen. Vær varm, tålmodig og ros innsats ofte.', slow: 0.82 },
+  { name: 'Barneskole', short: 'Barnesk.', rule: 'SPRÅKNIVÅ 2/6 – BARNESKOLE (5.–7. klasse): Korte, enkle setninger og vanlige ord. Forklar alle fagord med enkle ord. Bruk eksempler. Ta det viktigste først og ikke for mye om gangen. Vær oppmuntrende.', slow: 0.9 },
+  { name: 'Ungdomsskole', short: 'Ungdomssk.', rule: 'SPRÅKNIVÅ 3/6 – UNGDOMSSKOLE: Klare, ganske korte setninger. Fagord kan brukes, men forklar dem kort første gang.', slow: 1 },
+  { name: 'Videregående', short: 'VGS', rule: 'SPRÅKNIVÅ 4/6 – VIDEREGÅENDE: Vanlig, klart og saklig språk. Bruk fagbegrepene fra stoffet og forklar dem når det trengs. Vis sammenhenger.', slow: 1 },
+  { name: 'Presist', short: 'Presist', rule: 'SPRÅKNIVÅ 5/6 – PRESIST: Presist og faglig språk med riktige fagbegreper uten å forenkle. Ta med detaljer, nyanser og sammenhenger fra stoffet. Forklar bare de mest krevende begrepene.', slow: 1 },
+  { name: 'Universitet', short: 'Univ.', rule: 'SPRÅKNIVÅ 6/6 – UNIVERSITET: Akademisk, presist og nyansert språk. Bruk fagterminologi fritt og et rikt ordforråd. Vær nøyaktig med definisjoner, presiseringer, forbehold, årsakssammenhenger og analyse av det som står i stoffet.', slow: 1 },
 ];
-const level = () => Math.min(5, Math.max(1, +settings.level || 3));
+const MAXLVL = 6;
+const level = () => Math.min(MAXLVL, Math.max(1, +settings.level || 4));
 function levelRule() { return LEVELS[level()].rule + ' Uansett nivå: forenkling eller presisering skal ALDRI endre eller legge til fakta – bare måten ting forklares på.'; }
 function langRule() {
   return settings.lang === 'en'
@@ -236,7 +239,7 @@ function speak(text, { rate } = {}) {
       if (i >= chunks.length) return resolve(true);
       const u = new SpeechSynthesisUtterance(chunks[i++]);
       u.lang = voice?.lang || LANG[settings.lang].sr; if (voice) u.voice = voice;
-      u.rate = rate || +$('#pRate').value || 1;
+      u.rate = (rate || +$('#pRate').value || 1) * LEVELS[level()].slow;
       u.onend = next; u.onerror = next;
       speechSynthesis.speak(u);
     };
@@ -456,7 +459,12 @@ function renderSources() {
 }
 
 /* ---------- samtale ---------- */
-function addMsg(role, text) { const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text; $('#chatLog').appendChild(d); d.scrollIntoView({ block: 'end', behavior: 'smooth' }); return d; }
+function addMsg(role, text) {
+  const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text;
+  if (role === 'bot') d.title = 'Trykk for å høre';
+  $('#chatLog').appendChild(d); d.scrollIntoView({ block: 'end', behavior: 'smooth' }); return d;
+}
+document.addEventListener('click', e => { const m = e.target.closest('.msg.bot'); if (m && !live.on && m.textContent && m.textContent !== '…') speak(m.textContent); });
 function renderChat() {
   $('#chatLog').innerHTML = '';
   if (!cur.chat.length) addMsg('sys', hasKey() ? 'Trykk på den store knappen for å snakke fritt med appen – som Gemini Live. Du kan også skrive under. Si «snakk engelsk» for å bytte språk.' : 'Uten AI-nøkkel finner appen setningene i stoffet som passer best til spørsmålet ditt.');
@@ -534,7 +542,7 @@ function liveSystem() {
   const recent = cur.chat.slice(-12).map(m => (m.role === 'user' ? 'Eleven: ' : 'Du: ') + m.text).join('\n');
   return `Du er Leksehjelp, en varm, tålmodig og engasjert studiehjelper i en LIVE muntlig samtale med en elev om temaet «${cur.name || 'temaet'}».
 SPRÅK: Snakk norsk bokmål med naturlig norsk uttale. Hvis eleven ber deg snakke engelsk, bytt til engelsk og fortsett på engelsk til eleven ber om norsk igjen.
-${levelRule()} Hvis eleven ber deg forklare enklere eller mer avansert, juster deg etter det.
+${levelRule()}${level() <= 2 ? ' Snakk rolig og tydelig med små pauser. Still bare ett enkelt spørsmål om gangen. Ros innsats, og hvis eleven svarer feil: si det vennlig og hjelp eleven videre med et hint.' : ''} Hvis eleven ber deg forklare enklere eller mer avansert, juster deg etter det.
 FAKTA: Bruk KUN fakta fra STUDIESTOFFET under. Ikke finn på eller legg til fakta, tall, navn eller årstall. Står noe ikke i stoffet, si det rett ut. Gjengi fakta slik de står i stoffet.
 STIL: Dette er en muntlig samtale – svar kort og naturlig (som regel 1–4 setninger), snakk som en hyggelig lærer, ikke som en tekst. Ingen lister eller opplesning av overskrifter. Still gjerne oppfølgingsspørsmål for å sjekke at eleven har forstått.
 Eleven kan be deg om:
@@ -669,18 +677,20 @@ function stopLive() {
 let quiz = null;
 function resetQuiz() { quiz = null; $('#quizSetup').hidden = false; $('#quizRun').hidden = true; $('#quizRun').innerHTML = ''; }
 async function startQuiz(focus = null) {
-  const mode = segVal('quizMode'), type = segVal('quizType'), count = +segVal('quizCount'), level = segVal('quizLevel');
+  const mode = segVal('quizMode'), type = segVal('quizType'), count = +segVal('quizCount'), qlevel = segVal('quizLevel');
+  const nOpt = level() <= 1 ? 3 : 4;
   $('#quizSetup').hidden = true; const run = $('#quizRun'); run.hidden = false;
   run.innerHTML = '<p><span class="spin"></span>Lager quiz …</p>';
   let qs;
   try {
     if (hasKey()) {
-      const typeTxt = type === 'mc' ? 'Bare flervalg (4 alternativer).' : type === 'open' ? 'Bare åpne spørsmål (kort svar).' : 'Bland flervalg (4 alternativer) og åpne spørsmål omtrent likt.';
-      const res = await gemini(`Lag en quiz med ${count} spørsmål om studiestoffet. Nivå: ${level}. ${typeTxt}
+      const typeTxt = type === 'mc' ? `Bare flervalg (${nOpt} alternativer).` : type === 'open' ? 'Bare åpne spørsmål (kort svar).' : `Bland flervalg (${nOpt} alternativer) og åpne spørsmål omtrent likt.`;
+      const res = await gemini(`Lag en quiz med ${count} spørsmål om studiestoffet. Vanskelighetsgrad: ${qlevel}. ${typeTxt}
+Språket i spørsmål, alternativer, hint og forklaringer skal følge SPRÅKNIVÅET (${LEVELS[level()].name}).${level() <= 2 ? ' Spørsmålene skal være korte og konkrete, med bare én ting i hvert spørsmål. Åpne spørsmål skal kunne besvares med ett eller noen få ord.' : ''}${level() >= 5 ? ' Spørsmålene kan kreve forståelse, sammenligning og resonnering, ikke bare gjengivelse – men svaret må fortsatt følge av stoffet.' : ''}
 ${mode === 'oral' ? 'Quizen tas MUNTLIG: spørsmålene skal være lette å forstå når de leses høyt, korte alternativer.' : ''}
 ${focus ? 'Eleven bommet på disse – lag NYE spørsmål som øver på akkurat de samme faktaene fra en annen vinkel:\n' + focus.map(q => '- ' + q.question + ' (riktig: ' + q.answer + ')').join('\n') : 'Dekk de viktigste faktaene i hele stoffet, ikke bare starten.'}
 Alle svar SKAL kunne finnes i stoffet. Feil alternativer skal være troverdige men tydelig feil ifølge stoffet.
-Svar som JSON: {"questions":[{"type":"mc"|"open","question":"…","options":["…","…","…","…"],"correct":0,"answer":"riktig svar formulert kort","explanation":"kort forklaring","quote":"kort sitat fra stoffet som viser svaret"}]}  (options og correct bare for mc).`, { system: groundRules(), json: true, temp: 0.7 });
+Svar som JSON: {"questions":[{"type":"mc"|"open","question":"…","options":["…","…","…","…"],"correct":0,"answer":"riktig svar formulert kort","explanation":"kort forklaring","hint":"et lite hint som hjelper uten å røpe svaret","quote":"kort sitat fra stoffet som viser svaret"}]}  (options og correct bare for mc).`, { system: groundRules(), json: true, temp: 0.7 });
       qs = (res.questions || res).filter(q => q.question);
       qs.forEach(q => { if (q.type === 'mc' && (!Array.isArray(q.options) || q.options.length < 2)) q.type = 'open'; if (q.type === 'mc') { q.correct = Math.max(0, Math.min(q.options.length - 1, +q.correct || 0)); q.answer ||= q.options[q.correct]; } });
     } else qs = clozeQuiz(docText(), count);
@@ -694,6 +704,7 @@ function showQuestion() {
   const q = quiz.qs[quiz.i], run = $('#quizRun');
   run.innerHTML = `<div class="progress"><i style="width:${(quiz.i / quiz.qs.length) * 100}%"></i></div>
   <div class="qcard"><div class="num">Spørsmål ${quiz.i + 1} av ${quiz.qs.length}</div><div class="q">${esc(q.question)}</div>
+  <div class="row qtools"><button class="btn ghost small" id="qSay">🔊 Les opp</button>${q.hint ? '<button class="btn ghost small" id="qHint">💡 Hint</button>' : ''}</div><div id="qHintOut"></div>
   ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}">${LETTERS[k]}: ${esc(o)}</button>`).join('')}</div>`
       : `<textarea id="openAns" rows="3" placeholder="Skriv svaret ditt"></textarea>`}
   ${quiz.mode === 'oral' || q.type === 'open' ? `<div class="row" style="margin-top:10px">${quiz.mode === 'oral' ? '<button class="btn" id="qMic">🎤 Svar muntlig</button><button class="btn ghost" id="qRepeat">🔁 Les opp igjen</button>' : ''}${q.type === 'open' ? '<button class="btn primary" id="qSubmit">Svar</button>' : ''}</div>` : ''}
@@ -702,6 +713,10 @@ function showQuestion() {
   $$('.opts button', run).forEach(b => b.onclick = () => answerMC(+b.dataset.k));
   $('#qSubmit') && ($('#qSubmit').onclick = () => answerOpen($('#openAns').value));
   $('#qQuit').onclick = finishQuiz;
+  const sayQ = () => speak(q.question + (q.type === 'mc' ? '. ' + q.options.map((o, k) => `${LETTERS[k]}: ${o}.`).join(' ') : ''));
+  $('#qSay').onclick = sayQ;
+  $('#qHint') && ($('#qHint').onclick = () => { $('#qHintOut').innerHTML = `<div class="fb part">💡 ${esc(q.hint)}</div>`; if (settings.autoRead || quiz.mode === 'oral') speak(q.hint); });
+  if (quiz.mode !== 'oral' && settings.autoRead) sayQ();
   $('#qSkip').onclick = () => { stopSpeaking(); stopListening(); record(false, '(hoppet over)'); nextQ(); };
   if (quiz.mode === 'oral') {
     const readQ = () => speak(q.question + (q.type === 'mc' ? '. ' + q.options.map((o, k) => `${LETTERS[k]}: ${o}.`).join(' ') : ''));
@@ -864,11 +879,12 @@ function fillVoiceSelect() {
 }
 function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
+  $('#textSize').value = settings.textSize || 1; $('#fontSel').value = settings.font || ''; $('#autoRead').checked = !!settings.autoRead;
   $('#liveVoiceSel').innerHTML = LIVE_VOICES.map(v => `<option${v === (settings.liveVoice || 'Kore') ? ' selected' : ''}>${v}</option>`).join('');
   $('#builtinAi').textContent = PROXY ? '✅ Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
-$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; saveSettings(); renderTopics(); toast('Lagret'); };
+$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; settings.textSize = +$('#textSize').value; settings.font = $('#fontSel').value; settings.autoRead = $('#autoRead').checked; applyReading(); saveSettings(); renderTopics(); toast('Lagret'); };
 $('#testKey').onclick = async () => {
   const old = { ...settings }; settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim();
   $('#testOut').textContent = 'Tester …';
@@ -897,6 +913,16 @@ $('#langBtn').onclick = () => {
 };
 $('#liveBtn').onclick = startLive;
 function showLevel() { $('#levelRange').value = level(); $('#levelName').textContent = LEVELS[level()].name; }
+function applyReading() {
+  const r = document.documentElement;
+  r.style.setProperty('--fs', ({ 1: '16px', 2: '18px', 3: '21px' })[settings.textSize || 1]);
+  r.dataset.font = settings.font || '';
+  if (settings.font && !document.getElementById('fontcss')) {
+    const l = document.createElement('link'); l.id = 'fontcss'; l.rel = 'stylesheet';
+    l.href = 'https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap';
+    document.head.appendChild(l);
+  }
+}
 $('#levelRange').oninput = () => { settings.level = +$('#levelRange').value; showLevel(); };
 $('#levelRange').onchange = () => {
   saveSettings();
@@ -932,7 +958,7 @@ $('#runCheck').onclick = runCheck;
 (async () => {
   $('#versionLabel').textContent = 'Versjon ' + VERSION;
   await loadAll();
-  setLang(settings.lang || 'no'); showLevel();
+  setLang(settings.lang || 'no'); showLevel(); applyReading();
   if (isIOS && !isStandalone()) $('#installBtn').hidden = false;
   showHome();
   if ('serviceWorker' in navigator) {

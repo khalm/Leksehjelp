@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.4.0">
+<link rel="stylesheet" href="style.css?v=1.5.0">
 </head>
 <body>
 <header class="topbar">
@@ -43,9 +43,9 @@
   <div class="levelbar">
     <span class="small">Språk:</span>
     <span class="lvlend" aria-hidden="true">🧸</span>
-    <input type="range" id="levelRange" min="1" max="5" step="1" value="3" aria-label="Hvor komplisert språk">
+    <input type="range" id="levelRange" min="1" max="6" step="1" value="4" aria-label="Hvor komplisert språk">
     <span class="lvlend" aria-hidden="true">🎓</span>
-    <b id="levelName" class="small">Normalt</b>
+    <b id="levelName" class="small">Videregående</b>
   </div>
   <nav class="tabs" role="tablist">
     <button data-tab="material" class="active">📄 Stoff</button>
@@ -180,6 +180,16 @@
     <label class="field">Modell
       <input id="modelName" type="text" placeholder="Automatisk">
     </label>
+    <h3>Lesehjelp</h3>
+    <label class="field">Tekststørrelse
+      <select id="textSize"><option value="1">Normal</option><option value="2">Stor</option><option value="3">Ekstra stor</option></select>
+    </label>
+    <label class="field">Skrift
+      <select id="fontSel"><option value="">Vanlig</option><option value="lexend">Lettlest (Lexend)</option><option value="atkinson">Tydelige bokstaver (Atkinson)</option></select>
+    </label>
+    <label class="toggle"><input type="checkbox" id="autoRead"> Les opp spørsmål og svar automatisk</label>
+    <p class="small muted">Tips: trykk på et svar i samtalen for å høre det. Talen går saktere på de enkleste språknivåene.</p>
+    <h3>Stemmer</h3>
     <label class="field">Stemme i live-samtale
       <select id="liveVoiceSel"></select>
     </label>
@@ -207,7 +217,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.4.0"></script>
-<script src="app.js?v=1.4.0"></script>
+<script src="config.js?v=1.5.0"></script>
+<script src="app.js?v=1.5.0"></script>
 </body>
 </html>

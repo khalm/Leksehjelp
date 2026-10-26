@@ -9,7 +9,7 @@
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:var(--fs,16px)/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
 body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 .topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:var(--brand);color:#fff}
 @media (prefers-color-scheme: dark){.topbar{background:#162a44}}
@@ -120,3 +120,11 @@ details{margin-top:8px}
 .levelbar input{flex:1;accent-color:var(--brand);min-height:32px}
 .levelbar b{min-width:84px;text-align:right;white-space:nowrap}
 .lvlend{font-size:1.1rem}
+
+:root[data-font=lexend] body,:root[data-font=lexend] button,:root[data-font=lexend] input,:root[data-font=lexend] textarea,:root[data-font=lexend] select{font-family:Lexend,system-ui,sans-serif;letter-spacing:.01em}
+:root[data-font=atkinson] body,:root[data-font=atkinson] button,:root[data-font=atkinson] input,:root[data-font=atkinson] textarea,:root[data-font=atkinson] select{font-family:"Atkinson Hyperlegible",system-ui,sans-serif}
+:root[data-font] .readout p,:root[data-font] .msg{line-height:1.75;word-spacing:.08em}
+.btn,.seg button,.tabs button,.opts button{font-size:1em}
+.qtools{margin:-4px 0 10px}.btn.small{padding:6px 10px;min-height:36px;font-size:.9em}
+.msg.bot{cursor:pointer}
+.levelbar{font-size:15px;gap:6px}.levelbar b{min-width:0;font-size:14px}.levelbar input{min-width:70px}
