@@ -130,5 +130,5 @@ details{margin-top:8px}
 .levelbar{font-size:15px;gap:6px}.levelbar b{min-width:0;font-size:14px}.levelbar input{min-width:70px}
 .levelbar{flex-wrap:wrap;row-gap:2px}
 .levelbar b{order:-1;flex-basis:100%;text-align:left;font-size:14px}
-.levelbar b::before{content:"Forklaring: ";font-weight:400;color:var(--muted)}
+.levelbar b::before{content:"Språkbruk: ";font-weight:400;color:var(--muted)}
 .levelbar span{white-space:nowrap;font-size:13px}

@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -927,7 +927,7 @@ $('#levelRange').oninput = () => { settings.level = +$('#levelRange').value; sho
 $('#levelRange').onchange = () => {
   saveSettings();
   if (live.on && live.setupDone && live.ws?.readyState === 1) live.ws.send(JSON.stringify({ realtimeInput: { text: '(Bytt forklaringsstil fra nå: ' + LEVELS[level()].rule + ' Ikke kommenter endringen, bare fortsett.)' } }));
-  toast('Forklaring: ' + LEVELS[level()].name);
+  toast('Språkbruk: ' + LEVELS[level()].name);
 };
 $('#liveStop').onclick = stopLive;
 $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: [], created: Date.now(), updated: Date.now(), chat: [], cache: {} }; topics.push(t); saveTopics(); openTopic(t, 'material'); $('#topicName').focus(); };
