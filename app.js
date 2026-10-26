@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -736,5 +736,14 @@ $('#runCheck').onclick = runCheck;
   setLang(settings.lang || 'no');
   if (isIOS && !isStandalone()) $('#installBtn').hidden = false;
   showHome();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+  if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      reg.update().catch(() => { });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => { }); });
+    }).catch(() => { });
+    // Ny versjon tatt i bruk → last siden på nytt én gang
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  }
 })();
