@@ -1,8 +1,7 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
-const FALLBACK_MODEL = 'gemini-2.5-flash';
 const MAX_DOC_CHARS = 400000;
 
 /* ---------- små hjelpere ---------- */
@@ -63,14 +62,39 @@ function setLang(l, announce) {
 }
 
 /* ---------- Gemini ---------- */
+/* Finn de nyeste Flash-modellene automatisk (navnene endres ofte hos Google) */
+let modelCache = null;
+function rankModels(list) {
+  const bad = /(image|tts|audio|live|embed|vision|thinking-exp|computer|robotics|veo|imagen|aqa|gemma|nano|banana)/i;
+  const usable = list.filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini/.test(n) && /flash/.test(n) && !bad.test(n));
+  const ver = n => { const v = n.match(/gemini-(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
+  const score = n => ver(n) * 100 - (/lite/.test(n) ? 30 : 0) - (/(preview|exp)/.test(n) ? 5 : 0) - (/-\d{3,}$/.test(n) ? 1 : 0) + (/latest/.test(n) ? 50 : 0);
+  return usable.sort((a, b) => score(b) - score(a));
+}
+async function pickModels() {
+  if (modelCache) return modelCache;
+  const c = settings.autoModels;
+  if (c && Date.now() - c.t < 864e5 && c.list?.length) return (modelCache = c.list);
+  try {
+    const r = settings.apiKey
+      ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': settings.apiKey } })
+      : await fetch(PROXY + '/models');
+    if (r.ok) {
+      const list = rankModels((await r.json()).models || []).slice(0, 4);
+      if (list.length) { modelCache = list; settings.autoModels = { t: Date.now(), list }; saveSettings(); return list; }
+    }
+  } catch { }
+  return [DEFAULT_MODEL, 'gemini-3-flash', 'gemini-3-flash-preview'];
+}
+
 async function gemini(parts, { system = '', json = false, temp = 0.4, history = null } = {}) {
   if (!hasKey()) throw new Error('NOKEY');
   const contents = history ? history : [{ role: 'user', parts: Array.isArray(parts) ? parts : [{ text: parts }] }];
   const body = { contents, generationConfig: { temperature: temp } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (json) body.generationConfig.responseMimeType = 'application/json';
-  const models = [settings.model || DEFAULT_MODEL];
-  if (!settings.model) models.push(FALLBACK_MODEL);
+  const models = settings.model ? [settings.model] : await pickModels();
   let lastErr;
   for (const m of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -86,7 +110,7 @@ async function gemini(parts, { system = '', json = false, temp = 0.4, history = 
         return parseJSON(txt);
       }
       let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
-      if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); break; }
+      if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); modelCache = null; settings.autoModels = null; saveSettings(); break; }
       if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under ⚙.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
       if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
       if (r.status === 429 || r.status === 503 || r.status === 500 || r.status === 0) {
@@ -654,7 +678,7 @@ function fillVoiceSelect() {
   if (!nb.length) sel.innerHTML = '<option value="">Ingen norsk stemme funnet – installer «norsk» under talesyntese i telefonens innstillinger</option>';
 }
 function openSettings() {
-  $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; fillVoiceSelect(); $('#testOut').textContent = '';
+  $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
   $('#builtinAi').textContent = PROXY ? '✅ Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
