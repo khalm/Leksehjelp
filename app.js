@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -152,16 +152,16 @@ function docText(t = cur) {
 }
 const LEVELS = [
   null,
-  { name: '3. klasse', short: '3. kl', rule: 'SPRÅKNIVÅ 1/6 – FOR ET BARN I 3. KLASSE (ca. 8 år), som kan ha lærevansker (f.eks. dysleksi, konsentrasjonsvansker eller språkvansker): Bruk svært korte setninger med bare én ting i hver setning. Bruk bare vanlige, enkle ord barn kjenner. Ingen fremmedord – må et ord fra stoffet brukes, forklar det med en gang med enkle ord. Ta én ting om gangen og bare det aller viktigste. Gjenta det viktigste. Bruk konkrete eksempler barnet kjenner fra hverdagen. Vær varm, tålmodig og ros innsats ofte.', slow: 0.82 },
-  { name: 'Barneskole', short: 'Barnesk.', rule: 'SPRÅKNIVÅ 2/6 – BARNESKOLE (5.–7. klasse): Korte, enkle setninger og vanlige ord. Forklar alle fagord med enkle ord. Bruk eksempler. Ta det viktigste først og ikke for mye om gangen. Vær oppmuntrende.', slow: 0.9 },
-  { name: 'Ungdomsskole', short: 'Ungdomssk.', rule: 'SPRÅKNIVÅ 3/6 – UNGDOMSSKOLE: Klare, ganske korte setninger. Fagord kan brukes, men forklar dem kort første gang.', slow: 1 },
-  { name: 'Videregående', short: 'VGS', rule: 'SPRÅKNIVÅ 4/6 – VIDEREGÅENDE: Vanlig, klart og saklig språk. Bruk fagbegrepene fra stoffet og forklar dem når det trengs. Vis sammenhenger.', slow: 1 },
-  { name: 'Presist', short: 'Presist', rule: 'SPRÅKNIVÅ 5/6 – PRESIST: Presist og faglig språk med riktige fagbegreper uten å forenkle. Ta med detaljer, nyanser og sammenhenger fra stoffet. Forklar bare de mest krevende begrepene.', slow: 1 },
-  { name: 'Universitet', short: 'Univ.', rule: 'SPRÅKNIVÅ 6/6 – UNIVERSITET: Akademisk, presist og nyansert språk. Bruk fagterminologi fritt og et rikt ordforråd. Vær nøyaktig med definisjoner, presiseringer, forbehold, årsakssammenhenger og analyse av det som står i stoffet.', slow: 1 },
+  { name: 'Rolig og enkelt', rule: 'FORKLARINGSSTIL 1/6 – ROLIG OG ENKELT: Bruk svært korte setninger med bare én ting i hver setning. Bruk bare vanlige hverdagsord. Ingen fremmedord – må et ord fra stoffet brukes, forklar det med en gang med enkle ord. Ta én ting om gangen og bare det viktigste. Gjenta det viktigste. Bruk konkrete eksempler fra hverdagen. Vær varm og tålmodig, og ros innsats.', slow: 0.82 },
+  { name: 'Enkelt', rule: 'FORKLARINGSSTIL 2/6 – ENKELT: Korte, enkle setninger og vanlige ord. Forklar alle fagord med enkle ord. Bruk eksempler. Det viktigste først, og ikke for mye om gangen. Vær oppmuntrende.', slow: 0.9 },
+  { name: 'Tydelig', rule: 'FORKLARINGSSTIL 3/6 – TYDELIG: Klare, ganske korte setninger. Fagord kan brukes, men forklar dem kort første gang.', slow: 1 },
+  { name: 'Standard', rule: 'FORKLARINGSSTIL 4/6 – STANDARD: Vanlig, klart og saklig språk. Bruk fagbegrepene fra stoffet og forklar dem når det trengs. Vis sammenhenger.', slow: 1 },
+  { name: 'Detaljert', rule: 'FORKLARINGSSTIL 5/6 – DETALJERT: Presist og faglig språk med riktige fagbegreper uten å forenkle. Ta med detaljer, nyanser og sammenhenger fra stoffet. Forklar bare de mest krevende begrepene.', slow: 1 },
+  { name: 'Fagspråk', rule: 'FORKLARINGSSTIL 6/6 – FAGSPRÅK: Akademisk, presist og nyansert språk. Bruk fagterminologi fritt og et rikt ordforråd. Vær nøyaktig med definisjoner, presiseringer, forbehold, årsakssammenhenger og analyse av det som står i stoffet.', slow: 1 },
 ];
 const MAXLVL = 6;
 const level = () => Math.min(MAXLVL, Math.max(1, +settings.level || 4));
-function levelRule() { return LEVELS[level()].rule + ' Uansett nivå: forenkling eller presisering skal ALDRI endre eller legge til fakta – bare måten ting forklares på.'; }
+function levelRule() { return LEVELS[level()].rule + ' Uansett stil: forenkling eller presisering skal ALDRI endre eller legge til fakta – bare måten ting forklares på. Ikke nevn eller kommenter forklaringsstilen, og si aldri noe om elevens alder, klassetrinn, nivå eller evner. Snakk alltid med respekt, som til en likeverdig.'; }
 function langRule() {
   return settings.lang === 'en'
     ? 'Write and speak in ENGLISH, even though the study material may be in Norwegian. Translate terms correctly.'
@@ -686,7 +686,7 @@ async function startQuiz(focus = null) {
     if (hasKey()) {
       const typeTxt = type === 'mc' ? `Bare flervalg (${nOpt} alternativer).` : type === 'open' ? 'Bare åpne spørsmål (kort svar).' : `Bland flervalg (${nOpt} alternativer) og åpne spørsmål omtrent likt.`;
       const res = await gemini(`Lag en quiz med ${count} spørsmål om studiestoffet. Vanskelighetsgrad: ${qlevel}. ${typeTxt}
-Språket i spørsmål, alternativer, hint og forklaringer skal følge SPRÅKNIVÅET (${LEVELS[level()].name}).${level() <= 2 ? ' Spørsmålene skal være korte og konkrete, med bare én ting i hvert spørsmål. Åpne spørsmål skal kunne besvares med ett eller noen få ord.' : ''}${level() >= 5 ? ' Spørsmålene kan kreve forståelse, sammenligning og resonnering, ikke bare gjengivelse – men svaret må fortsatt følge av stoffet.' : ''}
+Språket i spørsmål, alternativer, hint og forklaringer skal følge FORKLARINGSSTILEN (${LEVELS[level()].name}).${level() <= 2 ? ' Spørsmålene skal være korte og konkrete, med bare én ting i hvert spørsmål. Åpne spørsmål skal kunne besvares med ett eller noen få ord.' : ''}${level() >= 5 ? ' Spørsmålene kan kreve forståelse, sammenligning og resonnering, ikke bare gjengivelse – men svaret må fortsatt følge av stoffet.' : ''}
 ${mode === 'oral' ? 'Quizen tas MUNTLIG: spørsmålene skal være lette å forstå når de leses høyt, korte alternativer.' : ''}
 ${focus ? 'Eleven bommet på disse – lag NYE spørsmål som øver på akkurat de samme faktaene fra en annen vinkel:\n' + focus.map(q => '- ' + q.question + ' (riktig: ' + q.answer + ')').join('\n') : 'Dekk de viktigste faktaene i hele stoffet, ikke bare starten.'}
 Alle svar SKAL kunne finnes i stoffet. Feil alternativer skal være troverdige men tydelig feil ifølge stoffet.
@@ -926,8 +926,8 @@ function applyReading() {
 $('#levelRange').oninput = () => { settings.level = +$('#levelRange').value; showLevel(); };
 $('#levelRange').onchange = () => {
   saveSettings();
-  if (live.on && live.setupDone && live.ws?.readyState === 1) live.ws.send(JSON.stringify({ realtimeInput: { text: '(Eleven har endret språknivå. Fra nå: ' + LEVELS[level()].rule + ' Ikke kommenter endringen, bare fortsett.)' } }));
-  toast('Språknivå: ' + LEVELS[level()].name + ' – gjelder nye svar');
+  if (live.on && live.setupDone && live.ws?.readyState === 1) live.ws.send(JSON.stringify({ realtimeInput: { text: '(Bytt forklaringsstil fra nå: ' + LEVELS[level()].rule + ' Ikke kommenter endringen, bare fortsett.)' } }));
+  toast('Forklaring: ' + LEVELS[level()].name);
 };
 $('#liveStop').onclick = stopLive;
 $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: [], created: Date.now(), updated: Date.now(), chat: [], cache: {} }; topics.push(t); saveTopics(); openTopic(t, 'material'); $('#topicName').focus(); };
