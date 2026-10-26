@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -49,6 +49,7 @@ async function loadAll() {
   Object.assign(settings, (await store.get('settings')) || {});
   if (settings.levelScale !== 6) { settings.level = Math.min(6, (+settings.level || 3) + 1); settings.levelScale = 6; }
   topics = (await store.get('topics')) || [];
+  pruneEmpty();
 }
 const saveSettings = () => store.set('settings', { ...settings });
 const saveTopics = () => store.set('topics', topics);
@@ -576,8 +577,14 @@ async function addWikiArticle(lang, title) {
 }
 
 /* ---------- navigasjon ---------- */
+/* Temaer uten stoff (opprettet, men aldri fylt) fjernes så de ikke hoper seg opp */
+function pruneEmpty() {
+  const before = topics.length;
+  topics = topics.filter(t => t === cur || t.sources.length);
+  if (topics.length !== before) saveTopics();
+}
 function showHome() {
-  stopPlayer(); stopListening(); stopLive(); cur = null;
+  stopPlayer(); stopListening(); stopLive(); cur = null; pruneEmpty();
   $('#home').hidden = false; $('#topic').hidden = true; $('#backBtn').hidden = true; $('#title').textContent = 'Leksehjelp';
   renderTopics();
 }
