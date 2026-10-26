@@ -1,10 +1,11 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
 /* ---------- små hjelpere ---------- */
+const MIC = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2" width="7" height="13" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -707,7 +708,7 @@ function showQuestion() {
   <div class="row qtools"><button class="btn ghost small" id="qSay">🔊 Les opp</button>${q.hint ? '<button class="btn ghost small" id="qHint">💡 Hint</button>' : ''}</div><div id="qHintOut"></div>
   ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}">${LETTERS[k]}: ${esc(o)}</button>`).join('')}</div>`
       : `<textarea id="openAns" rows="3" placeholder="Skriv svaret ditt"></textarea>`}
-  ${quiz.mode === 'oral' || q.type === 'open' ? `<div class="row" style="margin-top:10px">${quiz.mode === 'oral' ? '<button class="btn" id="qMic">🎤 Svar muntlig</button><button class="btn ghost" id="qRepeat">🔁 Les opp igjen</button>' : ''}${q.type === 'open' ? '<button class="btn primary" id="qSubmit">Svar</button>' : ''}</div>` : ''}
+  ${quiz.mode === 'oral' || q.type === 'open' ? `<div class="row" style="margin-top:10px">${quiz.mode === 'oral' ? '<button class="btn" id="qMic">' + MIC + ' Svar muntlig</button><button class="btn ghost" id="qRepeat">🔁 Les opp igjen</button>' : ''}${q.type === 'open' ? '<button class="btn primary" id="qSubmit">Svar</button>' : ''}</div>` : ''}
   <div id="qFb"></div></div>
   <div class="row" style="margin-top:12px"><button class="btn ghost" id="qQuit">Avslutt</button><span style="flex:1"></span><button class="btn" id="qSkip">Hopp over</button></div>`;
   $$('.opts button', run).forEach(b => b.onclick = () => answerMC(+b.dataset.k));
@@ -727,10 +728,10 @@ function showQuestion() {
 }
 async function oralAnswer() {
   const q = quiz.qs[quiz.i], btn = $('#qMic'); if (!btn || q.done) return;
-  btn.textContent = '🔴 Lytter …'; btn.classList.add('listening');
+  btn.innerHTML = MIC + ' Lytter …'; btn.classList.add('listening');
   if ($('#openAns')) listen.onInterim = t => $('#openAns').value = t;
   try {
-    const t = await listen(); btn.textContent = '🎤 Svar muntlig'; btn.classList.remove('listening');
+    const t = await listen(); btn.innerHTML = MIC + ' Svar muntlig'; btn.classList.remove('listening');
     if (!t || q.done) return;
     if (q.type === 'mc') {
       const s = t.toLowerCase().trim();
@@ -741,7 +742,7 @@ async function oralAnswer() {
       }
       if (k >= 0 && k < q.options.length) answerMC(k); else { toast('Fikk ikke med meg svaret – prøv igjen'); speak(settings.lang === 'en' ? 'Sorry, I did not catch that. Try again.' : 'Det fikk jeg ikke med meg. Prøv igjen.'); }
     } else answerOpen(t);
-  } catch (e) { btn.textContent = '🎤 Svar muntlig'; btn.classList.remove('listening'); toast(e.message, 5000); }
+  } catch (e) { btn.innerHTML = MIC + ' Svar muntlig'; btn.classList.remove('listening'); toast(e.message, 5000); }
   finally { listen.onInterim = null; }
 }
 function record(ok, given, partial = false) { const q = quiz.qs[quiz.i]; q.done = true; quiz.results.push({ q, ok, partial, given }); }
