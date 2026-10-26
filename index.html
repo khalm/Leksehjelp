@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.5.3">
+<link rel="stylesheet" href="style.css?v=1.5.4">
 </head>
 <body>
 <header class="topbar">
@@ -86,6 +86,7 @@
       <label class="toggle"><input type="checkbox" id="liveHalfDuplex"> Ikke avbryt (demp mikrofonen mens appen snakker – nyttig uten hodetelefoner)</label>
     </div>
     <div id="chatLog" class="chatlog"></div>
+    <button id="newMsgBtn" class="newmsg" hidden>↓ Nye meldinger</button>
     <div class="chatbar">
       <button id="micBtn" class="iconbtn big" aria-label="Snakk"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2" width="7" height="13" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <input id="chatInput" type="text" placeholder="Spør om temaet …">
@@ -216,7 +217,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.5.3"></script>
-<script src="app.js?v=1.5.3"></script>
+<script src="config.js?v=1.5.4"></script>
+<script src="app.js?v=1.5.4"></script>
 </body>
 </html>

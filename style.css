@@ -137,3 +137,6 @@ details{margin-top:8px}
 .liveorb .ico{width:46px;height:46px;vertical-align:middle}
 .iconbtn .ico{width:24px;height:24px}
 .btn .ico{width:1.15em;height:1.15em;margin-right:4px}
+
+.newmsg{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:8;border:0;border-radius:999px;padding:9px 16px;background:var(--brand);color:#fff;font:inherit;font-size:.9em;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+@media (prefers-color-scheme: dark){.newmsg{color:#0e1520}}

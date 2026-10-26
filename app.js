@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.3';
+const VERSION = '1.5.4';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -256,7 +256,7 @@ async function playFrom(i) {
   while (player.idx < player.items.length && my === player.token) {
     const el = player.items[player.idx];
     $$('.speaking').forEach(x => x.classList.remove('speaking'));
-    el.classList.add('speaking'); el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('speaking'); if (!touching && Date.now() - lastUserInput > 5000) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const done = await speak(el.textContent);
     if (my !== player.token) return;
     if (!done && !player.playing) return;
@@ -422,7 +422,7 @@ function openTopic(t, tab = 'material') {
   switchTab(tab); scrollTo(0, 0);
 }
 function switchTab(name) {
-  stopPlayer(); stopListening(); if (name !== 'chat') stopLive();
+  stopPlayer(); stopListening(); if (name !== 'chat') stopLive(); $('#newMsgBtn').hidden = true;
   $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(p => p.hidden = p.dataset.pane !== name);
   if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først 📄'); }
@@ -460,10 +460,29 @@ function renderSources() {
 }
 
 /* ---------- samtale ---------- */
-function addMsg(role, text) {
+/* Følg samtalen nedover bare når brukeren allerede er nederst – ikke dra brukeren ned hvis hen har scrollet opp */
+let userScrolledUp = false, lastUserInput = 0, touching = false;
+const nearBottom = () => innerHeight + scrollY >= document.documentElement.scrollHeight - 140;
+const markInput = () => { lastUserInput = Date.now(); };
+addEventListener('wheel', markInput, { passive: true });
+addEventListener('touchstart', () => { touching = true; markInput(); }, { passive: true });
+addEventListener('touchmove', markInput, { passive: true });
+addEventListener('touchend', () => { touching = false; markInput(); }, { passive: true });
+addEventListener('keydown', e => { if (/Arrow|Page|Home|End|Space/.test(e.code)) markInput(); });
+addEventListener('scroll', () => {
+  if (Date.now() - lastUserInput > 1200) return; // scroll som appen selv gjorde
+  userScrolledUp = !nearBottom();
+  if (!userScrolledUp) $('#newMsgBtn').hidden = true;
+}, { passive: true });
+function follow(el, force) {
+  if (force) userScrolledUp = false;
+  if (userScrolledUp || touching) { if (userScrolledUp && !$('[data-pane=chat]').hidden) $('#newMsgBtn').hidden = false; return; }
+  el.scrollIntoView({ block: 'end' });
+}
+function addMsg(role, text, force) {
   const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text;
   if (role === 'bot') d.title = 'Trykk for å høre';
-  $('#chatLog').appendChild(d); d.scrollIntoView({ block: 'end', behavior: 'smooth' }); return d;
+  $('#chatLog').appendChild(d); follow(d, force); return d;
 }
 document.addEventListener('click', e => { const m = e.target.closest('.msg.bot'); if (m && !live.on && m.textContent && m.textContent !== '…') speak(m.textContent); });
 function renderChat() {
@@ -482,14 +501,14 @@ async function sendChat(text) {
   text = text.trim(); if (!text) return;
   if (live.on && live.setupDone && live.ws?.readyState === 1) {
     $('#chatInput').value = ''; if (live.botB) flushBot(); stopPlayback();
-    addMsg('user', text); cur.chat.push({ role: 'user', text });
+    addMsg('user', text, true); cur.chat.push({ role: 'user', text });
     const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
     live.ws.send(JSON.stringify({ realtimeInput: { text } })); return;
   }
   if (chatBusy) return;
   chatBusy = true; $('#chatInput').value = '';
   const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
-  addMsg('user', text); cur.chat.push({ role: 'user', text });
+  addMsg('user', text, true); cur.chat.push({ role: 'user', text });
   const pending = addMsg('bot', '…');
   let reply;
   try {
@@ -585,12 +604,12 @@ function flushBot() { if (live.botT.trim()) cur.chat.push({ role: 'model', text:
 function liveUserText(t) {
   if (live.botB) flushBot();
   if (!live.userB) live.userB = addMsg('user', '');
-  live.userT += t; live.userB.textContent = live.userT.trim();
+  live.userT += t; live.userB.textContent = live.userT.trim(); follow(live.userB);
 }
 function liveBotText(t) {
   if (live.userB) flushUser();
   if (!live.botB) live.botB = addMsg('bot', '');
-  live.botT += t; live.botB.textContent = live.botT.trim(); live.botB.scrollIntoView({ block: 'end' });
+  live.botT += t; live.botB.textContent = live.botT.trim(); follow(live.botB);
 }
 async function startLive() {
   if (live.on) return stopLive();
@@ -913,6 +932,7 @@ $('#langBtn').onclick = () => {
   else if (!live.on) stopLive();
 };
 $('#liveBtn').onclick = startLive;
+$('#newMsgBtn').onclick = () => { userScrolledUp = false; $('#newMsgBtn').hidden = true; lastUserInput = 0; scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }); };
 function showLevel() { $('#levelRange').value = level(); $('#levelName').textContent = LEVELS[level()].name; }
 function applyReading() {
   const r = document.documentElement;
