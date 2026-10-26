@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leksehjelp</title>
+<meta name="description" content="Studer og pugg et tema: snakk med stoffet, ta quiz, hør foredrag og få sammendrag.">
+<meta name="theme-color" content="#1f3a5f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <button id="backBtn" class="iconbtn" aria-label="Tilbake" hidden>←</button>
+  <h1 id="title">Leksehjelp</h1>
+  <button id="langBtn" class="langbtn" aria-label="Bytt språk">🇳🇴 NO</button>
+  <button id="settingsBtn" class="iconbtn" aria-label="Innstillinger">⚙</button>
+</header>
+
+<main>
+<!-- HJEM -->
+<section id="home" class="screen">
+  <div class="hero">
+    <p class="lead">Legg inn pensum, så kan du snakke om det, ta quiz, høre foredrag og få sammendrag – alltid basert på <em>ditt</em> stoff.</p>
+    <div class="row">
+      <button id="installBtn" class="btn ghost" hidden>⬇ Installer app</button>
+      <span class="version" id="versionLabel"></span>
+    </div>
+  </div>
+  <div id="keyNotice" class="notice" hidden>
+    Appen virker best med en <b>gratis</b> Gemini-nøkkel (gir samtale, ekte quiz, foredrag og faktasjekk).
+    <button class="linkbtn" data-open-settings>Legg inn nøkkel</button>
+  </div>
+  <h2>Mine temaer</h2>
+  <ul id="topicList" class="cards"></ul>
+  <button id="newTopicBtn" class="btn primary wide">+ Nytt tema</button>
+</section>
+
+<!-- TEMA -->
+<section id="topic" class="screen" hidden>
+  <nav class="tabs" role="tablist">
+    <button data-tab="material" class="active">📄 Stoff</button>
+    <button data-tab="chat">💬 Snakk</button>
+    <button data-tab="quiz">❓ Quiz</button>
+    <button data-tab="lecture">🎓 Foredrag</button>
+    <button data-tab="summary">📝 Sammendrag</button>
+    <button data-tab="check">🔎 Sjekk</button>
+  </nav>
+
+  <!-- Stoff -->
+  <div class="tab" data-pane="material">
+    <label class="field">Navn på temaet
+      <input id="topicName" type="text" placeholder="F.eks. Vikingtiden">
+    </label>
+    <div class="addgrid">
+      <button class="btn" id="addCamera">📷 Ta bilde</button>
+      <button class="btn" id="addFile">📎 PDF / bilder / tekstfil</button>
+      <button class="btn" id="addPaste">✍ Lim inn tekst</button>
+    </div>
+    <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
+    <input id="fileInput" type="file" accept="application/pdf,image/*,.txt,.md,text/plain" multiple hidden>
+    <div id="pasteBox" hidden>
+      <textarea id="pasteText" rows="8" placeholder="Lim inn eller skriv teksten her"></textarea>
+      <div class="row"><button class="btn primary" id="pasteSave">Legg til</button><button class="btn ghost" id="pasteCancel">Avbryt</button></div>
+    </div>
+    <div id="importStatus" class="status" hidden></div>
+    <h3>Kilder i dette temaet</h3>
+    <ul id="sourceList" class="sources"></ul>
+    <p class="muted small" id="wordCount"></p>
+  </div>
+
+  <!-- Snakk -->
+  <div class="tab" data-pane="chat" hidden>
+    <div id="chatLog" class="chatlog"></div>
+    <div class="chatbar">
+      <button id="micBtn" class="iconbtn big" aria-label="Snakk">🎤</button>
+      <input id="chatInput" type="text" placeholder="Spør om temaet …">
+      <button id="sendBtn" class="iconbtn big" aria-label="Send">➤</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="speakReplies" checked> Les svarene høyt</label>
+    <label class="toggle"><input type="checkbox" id="conversationMode"> Samtalemodus (lytter igjen etter hvert svar)</label>
+  </div>
+
+  <!-- Quiz -->
+  <div class="tab" data-pane="quiz" hidden>
+    <div id="quizSetup">
+      <div class="seg" data-name="quizMode">
+        <button data-v="written" class="on">✍ Skriftlig</button>
+        <button data-v="oral">🗣 Muntlig</button>
+      </div>
+      <div class="seg" data-name="quizType">
+        <button data-v="mixed" class="on">Blandet</button>
+        <button data-v="mc">Flervalg</button>
+        <button data-v="open">Åpne spørsmål</button>
+      </div>
+      <div class="seg" data-name="quizCount">
+        <button data-v="5">5</button>
+        <button data-v="10" class="on">10</button>
+        <button data-v="20">20</button>
+      </div>
+      <div class="seg" data-name="quizLevel">
+        <button data-v="lett">Lett</button>
+        <button data-v="middels" class="on">Middels</button>
+        <button data-v="vanskelig">Vanskelig</button>
+      </div>
+      <button id="startQuiz" class="btn primary wide">Start quiz</button>
+      <p id="quizHint" class="muted small"></p>
+    </div>
+    <div id="quizRun" hidden></div>
+  </div>
+
+  <!-- Foredrag -->
+  <div class="tab" data-pane="lecture" hidden>
+    <div class="seg" data-name="lectureLen">
+      <button data-v="kort">Kort (~2 min)</button>
+      <button data-v="middels" class="on">Middels (~5 min)</button>
+      <button data-v="lang">Langt (~10 min)</button>
+    </div>
+    <button id="makeLecture" class="btn primary wide">Lag foredrag</button>
+    <div id="lectureOut" class="readout"></div>
+  </div>
+
+  <!-- Sammendrag -->
+  <div class="tab" data-pane="summary" hidden>
+    <div class="seg" data-name="summaryLen">
+      <button data-v="stikkord">Stikkord</button>
+      <button data-v="kort" class="on">Kort</button>
+      <button data-v="grundig">Grundig</button>
+    </div>
+    <button id="makeSummary" class="btn primary wide">Lag sammendrag</button>
+    <div id="summaryOut" class="readout"></div>
+  </div>
+
+  <!-- Faktasjekk -->
+  <div class="tab" data-pane="check" hidden>
+    <p class="muted">Sammenligner påstandene i stoffet ditt med Wikipedia og sier fra hvis noe ikke stemmer. Appen bruker likevel alltid <b>ditt</b> stoff i quiz og foredrag.</p>
+    <button id="runCheck" class="btn primary wide">Sjekk mot Wikipedia</button>
+    <div id="checkOut"></div>
+  </div>
+</section>
+</main>
+
+<!-- Lese-kontroller -->
+<div id="player" class="player" hidden>
+  <button id="pPrev" class="iconbtn" aria-label="Forrige">⏮</button>
+  <button id="pPlay" class="iconbtn big" aria-label="Spill/pause">⏸</button>
+  <button id="pNext" class="iconbtn" aria-label="Neste">⏭</button>
+  <select id="pRate" aria-label="Fart">
+    <option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option>
+  </select>
+  <button id="pStop" class="iconbtn" aria-label="Stopp">✕</button>
+</div>
+
+<!-- Innstillinger -->
+<dialog id="settings">
+  <form method="dialog" class="dlg">
+    <h2>Innstillinger</h2>
+    <label class="field">Gemini API-nøkkel (gratis)
+      <input id="apiKey" type="password" autocomplete="off" placeholder="AIza…">
+    </label>
+    <p class="small muted">Lag en gratis nøkkel på <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (logg inn med Google-konto, trykk «Create API key»). Nøkkelen lagres bare på denne telefonen. Merk: på gratisnivået kan Google bruke det du sender til å forbedre tjenestene sine – ikke legg inn personopplysninger.</p>
+    <label class="field">Modell
+      <input id="modelName" type="text" placeholder="gemini-flash-latest">
+    </label>
+    <label class="field">Stemme for opplesning
+      <select id="voiceSel"></select>
+    </label>
+    <button type="button" id="testKey" class="btn">Test nøkkelen</button>
+    <p id="testOut" class="small"></p>
+    <div class="row end"><button class="btn primary" value="ok" id="saveSettings">Lagre</button></div>
+  </form>
+</dialog>
+
+<dialog id="iosInstall">
+  <form method="dialog" class="dlg">
+    <h2>Installer på iPhone</h2>
+    <ol>
+      <li>Åpne siden i <b>Safari</b>.</li>
+      <li>Trykk på <b>Del</b>-knappen (firkant med pil opp).</li>
+      <li>Velg <b>«Legg til på Hjem-skjerm»</b> og trykk <b>Legg til</b>.</li>
+    </ol>
+    <div class="row end"><button class="btn primary">OK</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

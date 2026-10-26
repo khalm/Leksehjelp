@@ -1,0 +1,16 @@
+{
+  "name": "Leksehjelp",
+  "short_name": "Leksehjelp",
+  "description": "Studer og pugg et tema: snakk med stoffet, ta quiz, hør foredrag og få sammendrag.",
+  "lang": "nb",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f4ef",
+  "theme_color": "#1f3a5f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
