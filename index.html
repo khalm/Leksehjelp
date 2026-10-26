@@ -5,54 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Leksehjelp</title>
 <meta name="description" content="Studer og pugg et tema: snakk med stoffet, ta quiz, hør foredrag og få sammendrag.">
-<meta name="theme-color" content="#1f3a5f">
+<meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1218" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.5.5">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=add,arrow_back,arrow_downward,auto_stories,cancel,check_circle,close,co_present,content_copy,content_paste,delete,description,download,edit,edit_note,emoji_events,error,fact_check,forum,lightbulb,link,mic,open_in_new,pause,photo_camera,play_arrow,quiz,record_voice_over,replay,search,send,skip_next,skip_previous,stop,summarize,translate,travel_explore,tune,upload_file,volume_up&display=block">
+<link rel="stylesheet" href="style.css?v=1.6.0">
 </head>
 <body>
 <header class="topbar">
-  <button id="backBtn" class="iconbtn" aria-label="Tilbake" hidden>←</button>
+  <button id="backBtn" class="iconbtn" aria-label="Tilbake" hidden><span class="ms">arrow_back</span></button>
   <h1 id="title">Leksehjelp</h1>
-  <button id="langBtn" class="langbtn" aria-label="Bytt språk">🇳🇴 NO</button>
-  <button id="settingsBtn" class="iconbtn" aria-label="Innstillinger">⚙</button>
+  <button id="langBtn" class="pill" aria-label="Bytt språk"><span class="ms">translate</span><span id="langLabel">NO</span></button>
+  <button id="settingsBtn" class="iconbtn" aria-label="Innstillinger"><span class="ms">tune</span></button>
 </header>
 
 <main>
 <!-- HJEM -->
 <section id="home" class="screen">
   <div class="hero">
-    <p class="lead">Legg inn pensum, så kan du snakke om det, ta quiz, høre foredrag og få sammendrag – alltid basert på <em>ditt</em> stoff.</p>
-    <div class="row">
-      <button id="installBtn" class="btn ghost" hidden>⬇ Installer app</button>
+    <h2 class="hero-title">Hva vil du lære i dag?</h2>
+    <p class="lead">Søk opp et tema, eller legg inn ditt eget stoff. Så kan du snakke om det, ta quiz, høre foredrag og få sammendrag.</p>
+    <form id="homeSearch" class="searchbar">
+      <span class="ms">search</span>
+      <input id="homeQuery" type="search" placeholder="Søk etter et tema, f.eks. fotosyntese" enterkeyhint="search" autocomplete="off">
+      <button class="btn primary" type="submit">Søk</button>
+    </form>
+    <button id="newTopicBtn" class="btn wide"><span class="ms">add</span> Legg inn eget stoff</button>
+    <div class="row hero-foot">
+      <button id="installBtn" class="btn ghost small" hidden><span class="ms">download</span> Installer app</button>
       <span class="version" id="versionLabel"></span>
     </div>
   </div>
   <div id="keyNotice" class="notice" hidden>
-    Appen virker best med en <b>gratis</b> Gemini-nøkkel (gir samtale, ekte quiz, foredrag og faktasjekk).
-    <button class="linkbtn" data-open-settings>Legg inn nøkkel</button>
+    Appen trenger AI for samtale, quiz og foredrag.
+    <button class="linkbtn" data-open-settings>Legg inn en gratis nøkkel</button>
   </div>
-  <h2>Mine temaer</h2>
+  <h2 class="section-title">Mine temaer</h2>
   <ul id="topicList" class="cards"></ul>
-  <button id="newTopicBtn" class="btn primary wide">+ Nytt tema</button>
 </section>
 
 <!-- TEMA -->
 <section id="topic" class="screen" hidden>
   <div class="levelbar">
-    <span class="small muted">Enklere</span>
+    <span class="muted">Enklere</span>
     <input type="range" id="levelRange" min="1" max="6" step="1" value="4" aria-label="Språkbruk">
-    <span class="small muted">Mer faglig</span>
-    <b id="levelName" class="small">Standard</b>
+    <span class="muted">Mer faglig</span>
+    <b id="levelName">Standard</b>
   </div>
   <nav class="tabs" role="tablist">
-    <button data-tab="material" class="active">📄 Stoff</button>
-    <button data-tab="chat">💬 Snakk</button>
-    <button data-tab="quiz">❓ Quiz</button>
-    <button data-tab="lecture">🎓 Foredrag</button>
-    <button data-tab="summary">📝 Sammendrag</button>
-    <button data-tab="check">🔎 Sjekk</button>
+    <button data-tab="material" class="active"><span class="ms">description</span>Stoff</button>
+    <button data-tab="chat"><span class="ms">forum</span>Snakk</button>
+    <button data-tab="quiz"><span class="ms">quiz</span>Quiz</button>
+    <button data-tab="lecture"><span class="ms">co_present</span>Foredrag</button>
+    <button data-tab="summary"><span class="ms">summarize</span>Sammendrag</button>
+    <button data-tab="check"><span class="ms">fact_check</span>Sjekk</button>
   </nav>
 
   <!-- Stoff -->
@@ -60,17 +71,41 @@
     <label class="field">Navn på temaet
       <input id="topicName" type="text" placeholder="F.eks. Vikingtiden">
     </label>
-    <div class="addgrid">
-      <button class="btn" id="addCamera">📷 Ta bilde</button>
-      <button class="btn" id="addFile">📎 PDF / bilder / tekstfil</button>
-      <button class="btn" id="addPaste">✍ Lim inn tekst</button>
+    <h3>Legg til stoff</h3>
+    <div class="tiles">
+      <button class="tile" id="addCamera"><span class="ms">photo_camera</span>Ta bilde</button>
+      <button class="tile" id="addFile"><span class="ms">upload_file</span>Last opp fil</button>
+      <button class="tile" id="addLink"><span class="ms">link</span>Lim inn lenke</button>
+      <button class="tile" id="addWiki"><span class="ms">travel_explore</span>Søk på Wikipedia</button>
+      <button class="tile" id="addPaste"><span class="ms">edit_note</span>Skriv eller lim inn tekst</button>
     </div>
     <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
     <input id="fileInput" type="file" accept="application/pdf,image/*,.txt,.md,text/plain" multiple hidden>
-    <div id="pasteBox" hidden>
+
+    <div id="pasteBox" class="panel" hidden>
       <textarea id="pasteText" rows="8" placeholder="Lim inn eller skriv teksten her"></textarea>
-      <div class="row"><button class="btn primary" id="pasteSave">Legg til</button><button class="btn ghost" id="pasteCancel">Avbryt</button></div>
+      <div class="row end"><button class="btn ghost" id="pasteCancel">Avbryt</button><button class="btn primary" id="pasteSave">Legg til</button></div>
     </div>
+
+    <form id="linkBox" class="panel" hidden>
+      <label class="field">Lenke til en nettside, PDF, Google-dokument eller bilde
+        <input id="linkInput" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://…" autocomplete="off">
+      </label>
+      <div class="row end"><button type="button" class="btn ghost" id="linkCancel">Avbryt</button><button class="btn primary" type="submit">Hent</button></div>
+    </form>
+
+    <div id="wikiBox" class="panel" hidden>
+      <form id="wikiForm" class="searchbar">
+        <span class="ms">search</span>
+        <input id="wikiQuery" type="search" placeholder="Hva vil du finne?" enterkeyhint="search" autocomplete="off">
+        <button class="btn primary" type="submit">Søk</button>
+      </form>
+      <div class="chips" id="wikiLang">
+        <button data-l="no" class="on">Bokmål</button><button data-l="nn">Nynorsk</button><button data-l="en">Engelsk</button>
+      </div>
+      <div id="wikiOut"></div>
+    </div>
+
     <div id="importStatus" class="status" hidden></div>
     <h3>Kilder i dette temaet</h3>
     <ul id="sourceList" class="sources"></ul>
@@ -80,17 +115,17 @@
   <!-- Snakk -->
   <div class="tab" data-pane="chat" hidden>
     <div class="livebox">
-      <button id="liveBtn" class="liveorb" aria-label="Start live-samtale"><span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2" width="7" height="13" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span></button>
+      <button id="liveBtn" class="liveorb" aria-label="Start live-samtale"><span class="ms">mic</span></button>
       <div id="liveStatus" class="livestatus">Trykk for å starte live-samtale</div>
-      <button id="liveStop" class="btn ghost" hidden>■ Avslutt samtalen</button>
+      <button id="liveStop" class="btn ghost small" hidden><span class="ms">stop</span> Avslutt samtalen</button>
       <label class="toggle"><input type="checkbox" id="liveHalfDuplex"> Ikke avbryt (demp mikrofonen mens appen snakker – nyttig uten hodetelefoner)</label>
     </div>
     <div id="chatLog" class="chatlog"></div>
-    <button id="newMsgBtn" class="newmsg" hidden>↓ Nye meldinger</button>
+    <button id="newMsgBtn" class="newmsg" hidden><span class="ms">arrow_downward</span> Nye meldinger</button>
     <div class="chatbar">
-      <button id="micBtn" class="iconbtn big" aria-label="Snakk"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2" width="7" height="13" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="micBtn" class="iconbtn" aria-label="Snakk"><span class="ms">mic</span></button>
       <input id="chatInput" type="text" placeholder="Spør om temaet …">
-      <button id="sendBtn" class="iconbtn big" aria-label="Send">➤</button>
+      <button id="sendBtn" class="iconbtn send" aria-label="Send"><span class="ms">send</span></button>
     </div>
     <details class="small muted"><summary>Valg for skrevet samtale</summary>
     <label class="toggle"><input type="checkbox" id="speakReplies" checked> Les svarene høyt</label>
@@ -100,27 +135,31 @@
 
   <!-- Quiz -->
   <div class="tab" data-pane="quiz" hidden>
-    <div id="quizSetup">
+    <div id="quizSetup" class="card">
+      <p class="label">Hvordan vil du svare?</p>
       <div class="seg" data-name="quizMode">
-        <button data-v="written" class="on">✍ Skriftlig</button>
-        <button data-v="oral">🗣 Muntlig</button>
+        <button data-v="written" class="on"><span class="ms">edit</span>Skriftlig</button>
+        <button data-v="oral"><span class="ms">record_voice_over</span>Muntlig</button>
       </div>
+      <p class="label">Type spørsmål</p>
       <div class="seg" data-name="quizType">
         <button data-v="mixed" class="on">Blandet</button>
         <button data-v="mc">Flervalg</button>
-        <button data-v="open">Åpne spørsmål</button>
+        <button data-v="open">Åpne</button>
       </div>
+      <p class="label">Antall</p>
       <div class="seg" data-name="quizCount">
         <button data-v="5">5</button>
         <button data-v="10" class="on">10</button>
         <button data-v="20">20</button>
       </div>
+      <p class="label">Vanskelighetsgrad</p>
       <div class="seg" data-name="quizLevel">
         <button data-v="lett">Lett</button>
         <button data-v="middels" class="on">Middels</button>
         <button data-v="vanskelig">Vanskelig</button>
       </div>
-      <button id="startQuiz" class="btn primary wide">Start quiz</button>
+      <button id="startQuiz" class="btn primary wide"><span class="ms">play_arrow</span> Start quiz</button>
       <p id="quizHint" class="muted small"></p>
     </div>
     <div id="quizRun" hidden></div>
@@ -128,30 +167,38 @@
 
   <!-- Foredrag -->
   <div class="tab" data-pane="lecture" hidden>
-    <div class="seg" data-name="lectureLen">
-      <button data-v="kort">Kort (~2 min)</button>
-      <button data-v="middels" class="on">Middels (~5 min)</button>
-      <button data-v="lang">Langt (~10 min)</button>
+    <div class="card">
+      <p class="label">Lengde</p>
+      <div class="seg" data-name="lectureLen">
+        <button data-v="kort">Kort · 2 min</button>
+        <button data-v="middels" class="on">Middels · 5 min</button>
+        <button data-v="lang">Langt · 10 min</button>
+      </div>
+      <button id="makeLecture" class="btn primary wide"><span class="ms">co_present</span> Lag foredrag</button>
     </div>
-    <button id="makeLecture" class="btn primary wide">Lag foredrag</button>
     <div id="lectureOut" class="readout"></div>
   </div>
 
   <!-- Sammendrag -->
   <div class="tab" data-pane="summary" hidden>
-    <div class="seg" data-name="summaryLen">
-      <button data-v="stikkord">Stikkord</button>
-      <button data-v="kort" class="on">Kort</button>
-      <button data-v="grundig">Grundig</button>
+    <div class="card">
+      <p class="label">Type</p>
+      <div class="seg" data-name="summaryLen">
+        <button data-v="stikkord">Stikkord</button>
+        <button data-v="kort" class="on">Kort</button>
+        <button data-v="grundig">Grundig</button>
+      </div>
+      <button id="makeSummary" class="btn primary wide"><span class="ms">summarize</span> Lag sammendrag</button>
     </div>
-    <button id="makeSummary" class="btn primary wide">Lag sammendrag</button>
     <div id="summaryOut" class="readout"></div>
   </div>
 
   <!-- Faktasjekk -->
   <div class="tab" data-pane="check" hidden>
-    <p class="muted">Sammenligner påstandene i stoffet ditt med Wikipedia og sier fra hvis noe ikke stemmer. Appen bruker likevel alltid <b>ditt</b> stoff i quiz og foredrag.</p>
-    <button id="runCheck" class="btn primary wide">Sjekk mot Wikipedia</button>
+    <div class="card">
+      <p class="muted">Sammenligner påstandene i stoffet ditt med Wikipedia og sier fra hvis noe ikke stemmer. Appen bruker likevel alltid <b>ditt</b> stoff i quiz og foredrag.</p>
+      <button id="runCheck" class="btn primary wide"><span class="ms">fact_check</span> Sjekk mot Wikipedia</button>
+    </div>
     <div id="checkOut"></div>
   </div>
 </section>
@@ -159,27 +206,19 @@
 
 <!-- Lese-kontroller -->
 <div id="player" class="player" hidden>
-  <button id="pPrev" class="iconbtn" aria-label="Forrige">⏮</button>
-  <button id="pPlay" class="iconbtn big" aria-label="Spill/pause">⏸</button>
-  <button id="pNext" class="iconbtn" aria-label="Neste">⏭</button>
+  <button id="pPrev" class="iconbtn" aria-label="Forrige"><span class="ms">skip_previous</span></button>
+  <button id="pPlay" class="iconbtn play" aria-label="Spill/pause"><span class="ms">pause</span></button>
+  <button id="pNext" class="iconbtn" aria-label="Neste"><span class="ms">skip_next</span></button>
   <select id="pRate" aria-label="Fart">
     <option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option>
   </select>
-  <button id="pStop" class="iconbtn" aria-label="Stopp">✕</button>
+  <button id="pStop" class="iconbtn" aria-label="Stopp"><span class="ms">close</span></button>
 </div>
 
 <!-- Innstillinger -->
 <dialog id="settings">
   <form method="dialog" class="dlg">
-    <h2>Innstillinger</h2>
-    <p class="small" id="builtinAi"></p>
-    <label class="field">Egen Gemini API-nøkkel (valgfritt)
-      <input id="apiKey" type="password" autocomplete="off" placeholder="AIza…">
-    </label>
-    <p class="small muted">Lag en gratis nøkkel på <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (logg inn med Google-konto, trykk «Create API key»). Nøkkelen lagres bare på denne telefonen. Merk: på gratisnivået kan Google bruke det du sender til å forbedre tjenestene sine – ikke legg inn personopplysninger.</p>
-    <label class="field">Modell
-      <input id="modelName" type="text" placeholder="Automatisk">
-    </label>
+    <div class="dlg-head"><h2>Innstillinger</h2><button class="iconbtn" value="cancel" aria-label="Lukk"><span class="ms">close</span></button></div>
     <h3>Lesehjelp</h3>
     <label class="field">Tekststørrelse
       <select id="textSize"><option value="1">Normal</option><option value="2">Stor</option><option value="3">Ekstra stor</option></select>
@@ -188,7 +227,7 @@
       <select id="fontSel"><option value="">Vanlig</option><option value="lexend">Lettlest (Lexend)</option><option value="atkinson">Tydelige bokstaver (Atkinson)</option></select>
     </label>
     <label class="toggle"><input type="checkbox" id="autoRead"> Les opp spørsmål og svar automatisk</label>
-    <p class="small muted">Tips: trykk på et svar i samtalen for å høre det. Talen går litt roligere når forklaringen er satt til enklere.</p>
+    <p class="small muted">Tips: trykk på et svar i samtalen for å høre det. Talen går litt roligere når språkbruken er satt til enklere.</p>
     <h3>Stemmer</h3>
     <label class="field">Stemme i live-samtale
       <select id="liveVoiceSel"></select>
@@ -196,7 +235,16 @@
     <label class="field">Stemme for opplesning
       <select id="voiceSel"></select>
     </label>
-    <button type="button" id="testKey" class="btn">Test nøkkelen</button>
+    <h3>AI</h3>
+    <p class="small" id="builtinAi"></p>
+    <label class="field">Egen Gemini API-nøkkel (valgfritt)
+      <input id="apiKey" type="password" autocomplete="off" placeholder="AIza…">
+    </label>
+    <p class="small muted">Lag en gratis nøkkel på <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Nøkkelen lagres bare på denne enheten. På gratisnivået kan Google bruke det du sender til å forbedre tjenestene sine – ikke legg inn personopplysninger.</p>
+    <label class="field">Modell
+      <input id="modelName" type="text" placeholder="Automatisk">
+    </label>
+    <button type="button" id="testKey" class="btn small">Test AI-tilkoblingen</button>
     <p id="testOut" class="small"></p>
     <div class="row end"><button class="btn primary" value="ok" id="saveSettings">Lagre</button></div>
   </form>
@@ -217,7 +265,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.5.5"></script>
-<script src="app.js?v=1.5.5"></script>
+<script src="config.js?v=1.6.0"></script>
+<script src="app.js?v=1.6.0"></script>
 </body>
 </html>

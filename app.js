@@ -1,11 +1,12 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.5';
+const VERSION = '1.6.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
 /* ---------- små hjelpere ---------- */
-const MIC = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2" width="7" height="13" rx="3.5"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const ic = (n, cls = '') => `<span class="ms ${cls}" aria-hidden="true">${n}</span>`;
+const MIC = ic('mic');
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -54,13 +55,13 @@ const saveTopics = () => store.set('topics', topics);
 
 /* ---------- språk ---------- */
 const LANG = {
-  no: { label: '🇳🇴 NO', sr: 'nb-NO', voice: ['nb', 'no', 'nn'], name: 'norsk bokmål' },
-  en: { label: '🇬🇧 EN', sr: 'en-US', voice: ['en'], name: 'engelsk (English)' },
+  no: { label: 'NO', sr: 'nb-NO', voice: ['nb', 'no', 'nn'], name: 'norsk bokmål' },
+  en: { label: 'EN', sr: 'en-US', voice: ['en'], name: 'engelsk (English)' },
 };
 function setLang(l, announce) {
   settings.lang = l; saveSettings();
-  $('#langBtn').textContent = LANG[l].label;
-  if (announce) toast(l === 'en' ? 'Switched to English 🇬🇧' : 'Byttet til norsk 🇳🇴');
+  $('#langLabel').textContent = LANG[l].label;
+  if (announce) toast(l === 'en' ? 'Switched to English' : 'Byttet til norsk');
 }
 
 /* ---------- Gemini ---------- */
@@ -129,7 +130,7 @@ async function gemini(parts, { system = '', json = false, temp = 0.4, history = 
       }
       let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
       if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); modelCache = null; settings.autoModels = null; saveSettings(); break; }
-      if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under ⚙.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
+      if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under Innstillinger.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
       if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
       if (r.status === 429 || r.status === 503 || r.status === 500 || r.status === 0) {
         lastErr = new Error(r.status === 429 ? 'Gratiskvoten er brukt opp akkurat nå. Vent litt og prøv igjen.' : r.status === 0 ? 'Ingen nettforbindelse.' : 'Google er opptatt akkurat nå. Prøv igjen.');
@@ -252,7 +253,7 @@ function speak(text, { rate } = {}) {
 const player = { items: [], idx: 0, playing: false, token: 0 };
 async function playFrom(i) {
   const my = ++player.token; player.idx = i; player.playing = true;
-  $('#player').hidden = false; $('#pPlay').textContent = '⏸';
+  $('#player').hidden = false; $('#pPlay').innerHTML = ic('pause');
   while (player.idx < player.items.length && my === player.token) {
     const el = player.items[player.idx];
     $$('.speaking').forEach(x => x.classList.remove('speaking'));
@@ -262,11 +263,11 @@ async function playFrom(i) {
     if (!done && !player.playing) return;
     player.idx++;
   }
-  if (my === player.token) { player.playing = false; $('#pPlay').textContent = '▶'; $$('.speaking').forEach(x => x.classList.remove('speaking')); }
+  if (my === player.token) { player.playing = false; $('#pPlay').innerHTML = ic('play_arrow'); $$('.speaking').forEach(x => x.classList.remove('speaking')); }
 }
 function startReading(container) { player.items = $$('h3,p,li', container); if (player.items.length) playFrom(0); }
 function stopPlayer() { player.token++; player.playing = false; stopSpeaking(); $('#player').hidden = true; $$('.speaking').forEach(x => x.classList.remove('speaking')); }
-$('#pPlay').onclick = () => { if (player.playing) { player.token++; player.playing = false; stopSpeaking(); $('#pPlay').textContent = '▶'; } else playFrom(player.idx); };
+$('#pPlay').onclick = () => { if (player.playing) { player.token++; player.playing = false; stopSpeaking(); $('#pPlay').innerHTML = ic('play_arrow'); } else playFrom(player.idx); };
 $('#pNext').onclick = () => playFrom(Math.min(player.idx + 1, player.items.length - 1));
 $('#pPrev').onclick = () => playFrom(Math.max(player.idx - 1, 0));
 $('#pStop').onclick = stopPlayer;
@@ -395,15 +396,148 @@ async function importFiles(files) {
       text = (text || '').trim();
       if (!text) { toast(`Fant ingen tekst i ${f.name}`); continue; }
       const name = f.name && !/^image\.\w+$/i.test(f.name) ? f.name : 'Bilde ' + new Date().toLocaleString('nb-NO', { dateStyle: 'short', timeStyle: 'short' });
-      cur.sources.push({ id: uid(), name, text });
-      if (!cur.name) { cur.name = guessName(text); $('#topicName').value = cur.name; $('#title').textContent = cur.name; }
-      touch(); renderSources(); toast('La til ' + name);
+      addSource(name, text); toast('La til ' + name);
     } catch (e) { toast(`Feil med ${f.name}: ${e.message}`, 5000); }
   }
   setStatus('');
 }
 function guessName(t) { const l = t.split('\n').map(s => s.replace(/^#+\s*/, '').trim()).find(s => s.length > 3 && s.length < 60); return l || 'Nytt tema'; }
 function touch() { cur.updated = Date.now(); cur.cache = {}; saveTopics(); }
+
+function addSource(name, text, url) {
+  cur.sources.push({ id: uid(), name, text, ...(url ? { url } : {}) });
+  if (!cur.name) { cur.name = guessName(name.replace(/^Wikipedia: /, '') + '\n' + text); $('#topicName').value = cur.name; $('#title').textContent = cur.name; }
+  touch(); renderSources();
+}
+
+/* ---------- import fra lenke ---------- */
+let readabilityP = null;
+function loadReadability() {
+  if (!readabilityP) readabilityP = new Promise(res => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/@mozilla/readability@0.5.0/Readability.js'; s.onload = () => res(window.Readability || null); s.onerror = () => res(null); document.head.appendChild(s); });
+  return readabilityP;
+}
+async function fetchViaProxy(url) {
+  const tryDirect = async () => { const r = await fetch(url); if (!r.ok) throw new Error('Siden svarte med feil ' + r.status); return r; };
+  if (!PROXY) return tryDirect();
+  const r = await fetch(PROXY + '/fetch?url=' + encodeURIComponent(url));
+  if (!r.ok) { let m = ''; try { m = (await r.json()).error?.message; } catch { } throw new Error(m || ('Klarte ikke å hente siden (' + r.status + ')')); }
+  return r;
+}
+function htmlToText(html, baseUrl) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  try { const b = doc.createElement('base'); b.href = baseUrl; doc.head.appendChild(b); } catch { }
+  return doc;
+}
+function domToText(root) {
+  root.querySelectorAll('script,style,noscript,nav,footer,header,aside,form,iframe,svg,button,[role=navigation],[aria-hidden=true]').forEach(n => n.remove());
+  const out = [];
+  root.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,td,th,figcaption,pre').forEach(n => {
+    if (n.closest('li') && n.tagName !== 'LI') return;
+    const t = n.textContent.replace(/\s+/g, ' ').trim(); if (!t) return;
+    out.push(/^H\d$/.test(n.tagName) ? '# ' + t : n.tagName === 'LI' ? '- ' + t : t);
+  });
+  const txt = out.join('\n'); return txt.length > 200 ? txt : root.textContent.replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim();
+}
+function normalizeUrl(u) {
+  u = u.trim(); if (!u) return null;
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try { return new URL(u); } catch { return null; }
+}
+async function importUrl(raw) {
+  const u = normalizeUrl(raw); if (!u) { toast('Det ser ikke ut som en gyldig lenke'); return; }
+  // Wikipedia-lenker hentes rent via Wikipedia sitt eget grensesnitt
+  const wm = u.hostname.match(/^([a-z-]+)\.(?:m\.)?wikipedia\.org$/) ;
+  if (wm && /^\/wiki\//.test(u.pathname)) {
+    setStatus(`<span class="spin"></span>Henter artikkelen fra Wikipedia …`);
+    try { const title = decodeURIComponent(u.pathname.slice(6)).replace(/_/g, ' '); await addWikiArticle(wm[1], title); }
+    catch (e) { toast(e.message, 5000); } finally { setStatus(''); }
+    return true;
+  }
+  let fetchUrl = u.href;
+  const gdoc = u.href.match(/docs\.google\.com\/document\/d\/([\w-]+)/);
+  const gslide = u.href.match(/docs\.google\.com\/presentation\/d\/([\w-]+)/);
+  const gfile = u.href.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/);
+  if (gdoc) fetchUrl = `https://docs.google.com/document/d/${gdoc[1]}/export?format=txt`;
+  else if (gslide) fetchUrl = `https://docs.google.com/presentation/d/${gslide[1]}/export/txt`;
+  else if (gfile) fetchUrl = `https://drive.google.com/uc?export=download&id=${gfile[1]}`;
+  setStatus(`<span class="spin"></span>Henter ${esc(u.hostname)} …`);
+  try {
+    const r = await fetchViaProxy(fetchUrl);
+    const type = (r.headers.get('content-type') || '').toLowerCase();
+    const finalUrl = r.headers.get('x-final-url') || fetchUrl;
+    let name = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || u.hostname), text = '';
+    if (type.includes('pdf') || /\.pdf($|\?)/i.test(finalUrl)) {
+      const blob = await r.blob(); text = await readPdf(new File([blob], name.endsWith('.pdf') ? name : name + '.pdf', { type: 'application/pdf' }));
+    } else if (type.startsWith('image/')) {
+      const blob = await r.blob(); text = await readImage(new File([blob], name, { type }));
+    } else if (type.includes('html') || type.includes('xml')) {
+      const html = await r.text(); const doc = htmlToText(html, finalUrl);
+      name = (doc.querySelector('meta[property="og:title"]')?.content || doc.title || name).trim();
+      const R = await loadReadability();
+      if (R) { try { const art = new R(doc.cloneNode(true)).parse(); if (art?.content) { const d = new DOMParser().parseFromString(art.content, 'text/html'); text = domToText(d.body); if (art.title) name = art.title; } } catch { } }
+      if (!text || text.length < 200) text = domToText(doc.body);
+    } else {
+      text = await r.text();
+      if (gdoc || gslide) name = 'Google-dokument';
+    }
+    text = (text || '').trim();
+    if (text.length < 40) throw new Error('Fant nesten ingen tekst på siden. Den kan kreve innlogging – prøv å kopiere teksten i stedet.');
+    addSource(name.slice(0, 120), text, u.href);
+    toast('La til ' + name.slice(0, 60));
+    return true;
+  } catch (e) {
+    toast(/Failed to fetch|NetworkError|Load failed/i.test(e.message) ? 'Klarte ikke å hente siden. Prøv å kopiere teksten og lim den inn i stedet.' : e.message, 6000);
+  } finally { setStatus(''); }
+}
+
+/* ---------- søk på Wikipedia ---------- */
+let wikiLang = 'no';
+const WIKI_CUT = /^(Referanser|Kilder|Litteratur|Eksterne lenker|Se også|Noter|Fotnoter|Videre lesning|References|See also|External links|Further reading|Notes|Bibliography|Sources|Citations)$/i;
+const wikiApi = (lang, params) => fetch(`https://${lang}.wikipedia.org/w/api.php?format=json&formatversion=2&origin=*&` + new URLSearchParams(params)).then(r => { if (!r.ok) throw new Error('Wikipedia svarte ikke'); return r.json(); });
+async function wikiSearch(q) {
+  const out = $('#wikiOut'); q = q.trim(); if (!q) return;
+  out.innerHTML = `<p class="muted"><span class="spin"></span>Søker på Wikipedia …</p>`;
+  try {
+    const d = await wikiApi(wikiLang, { action: 'query', generator: 'search', gsrsearch: q, gsrlimit: 8, prop: 'pageimages|description|extracts', exintro: 1, explaintext: 1, exsentences: 2, exlimit: 'max', piprop: 'thumbnail', pithumbsize: 160 });
+    const pages = (d.query?.pages || []).sort((a, b) => a.index - b.index);
+    if (!pages.length) { out.innerHTML = `<p class="muted">Fant ingen artikler om «${esc(q)}». Prøv et annet ord${wikiLang !== 'en' ? ', eller søk på engelsk Wikipedia' : ''}.</p>`; return; }
+    out.innerHTML = `<p class="small muted" style="margin:12px 0 0">Trykk på artikkelen som handler om det du leter etter:</p><ul class="wres">${pages.map((p, i) => `<li data-i="${i}">${p.thumbnail ? `<img src="${esc(p.thumbnail.source)}" alt="" loading="lazy">` : `<span class="noimg">${ic('description')}</span>`}<div><b>${esc(p.title)}</b><small>${esc(p.description || (p.extract || '').slice(0, 140))}</small></div></li>`).join('')}</ul>`;
+    $$('.wres li', out).forEach(li => li.onclick = () => wikiPreview(pages[+li.dataset.i], q));
+  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
+}
+async function wikiPreview(p, q) {
+  const out = $('#wikiOut');
+  out.innerHTML = `<p class="muted"><span class="spin"></span>Henter artikkelen …</p>`;
+  try {
+    const d = await wikiApi(wikiLang, { action: 'query', titles: p.title, prop: 'pageimages|description|extracts|info', inprop: 'url', exintro: 1, explaintext: 1, piprop: 'thumbnail', pithumbsize: 640, redirects: 1 });
+    const a = d.query?.pages?.[0] || p;
+    const url = a.fullurl || `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(a.title.replace(/ /g, '_'))}`;
+    out.innerHTML = `<div class="wprev">${a.thumbnail ? `<img src="${esc(a.thumbnail.source)}" alt="">` : ''}
+      <h4>${esc(a.title)}</h4>${a.description ? `<p class="desc">${esc(a.description)}</p>` : ''}
+      <div class="intro">${md(a.extract || 'Ingen innledning.')}</div>
+      <a href="${esc(url)}" target="_blank" rel="noopener" class="small">${ic('open_in_new')} Les hele artikkelen på Wikipedia</a>
+      <p class="q">Er dette riktig artikkel?</p>
+      <div class="row"><button class="btn ghost" id="wNo">${ic('arrow_back')} Nei, vis andre treff</button><button class="btn primary" id="wYes">${ic('check_circle')} Ja, bruk denne</button></div></div>`;
+    $('#wNo').onclick = () => wikiSearch(q);
+    $('#wYes').onclick = async () => {
+      $('#wYes').disabled = true; $('#wYes').innerHTML = '<span class="spin"></span>Legger til …';
+      try { await addWikiArticle(wikiLang, a.title); $('#wikiOut').innerHTML = `<div class="fb ok">${ic('check_circle')}«${esc(a.title)}» er lagt til som kilde. Du kan søke etter flere artikler, eller gå videre til Snakk, Quiz eller Foredrag.</div>`; }
+      catch (e) { toast(e.message, 5000); $('#wYes').disabled = false; $('#wYes').innerHTML = ic('check_circle') + ' Ja, bruk denne'; }
+    };
+  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
+}
+async function addWikiArticle(lang, title) {
+  const d = await wikiApi(lang, { action: 'query', titles: title, prop: 'extracts|info', inprop: 'url', explaintext: 1, exsectionformat: 'wiki', redirects: 1 });
+  const a = d.query?.pages?.[0];
+  if (!a || a.missing || !a.extract) throw new Error('Fant ikke artikkelen på Wikipedia');
+  const lines = []; for (const l of a.extract.split('\n')) {
+    const h = l.match(/^(=+)\s*(.*?)\s*=+$/);
+    if (h) { if (WIKI_CUT.test(h[2])) break; lines.push('#'.repeat(Math.min(3, h[1].length - 1)) + ' ' + h[2]); } else lines.push(l);
+  }
+  const text = ('# ' + a.title + '\n' + lines.join('\n')).replace(/\n{3,}/g, '\n\n').trim();
+  addSource('Wikipedia: ' + a.title, text, a.fullurl || `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(a.title)}`);
+  toast('La til Wikipedia-artikkelen «' + a.title + '»');
+}
 
 /* ---------- navigasjon ---------- */
 function showHome() {
@@ -415,7 +549,7 @@ function openTopic(t, tab = 'material') {
   cur = t; cur.cache ||= {}; cur.chat ||= [];
   $('#home').hidden = true; $('#topic').hidden = false; $('#backBtn').hidden = false;
   $('#title').textContent = t.name || 'Nytt tema'; $('#topicName').value = t.name || '';
-  renderSources(); renderChat(); resetQuiz();
+  renderSources(); renderChat(); resetQuiz(); showPanel(null); $('#wikiOut').innerHTML = '';
   $('#lectureOut').innerHTML = cur.cache.lecture ? md(cur.cache.lecture) : '';
   $('#summaryOut').innerHTML = cur.cache.summary ? md(cur.cache.summary) : '';
   $('#checkOut').innerHTML = cur.cache.check || '';
@@ -425,16 +559,16 @@ function switchTab(name) {
   stopPlayer(); stopListening(); if (name !== 'chat') stopLive(); $('#newMsgBtn').hidden = true;
   $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(p => p.hidden = p.dataset.pane !== name);
-  if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først 📄'); }
+  if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først'); }
   if (name === 'quiz') $('#quizHint').textContent = hasKey() ? '' : 'Uten AI-nøkkel lages enkle «fyll inn ordet»-spørsmål.';
 }
 function renderTopics() {
   const ul = $('#topicList');
-  ul.innerHTML = topics.length ? '' : '<li class="empty">Ingen temaer ennå. Trykk «Nytt tema» for å begynne.</li>';
+  ul.innerHTML = topics.length ? '' : '<li class="empty">Ingen temaer ennå. Søk etter et tema over, eller legg inn ditt eget stoff.</li>';
   [...topics].sort((a, b) => (b.updated || 0) - (a.updated || 0)).forEach(t => {
     const li = document.createElement('li');
     const wc = words(t.sources.map(s => s.text).join(' ')).length;
-    li.innerHTML = `<div class="t"><b>${esc(t.name || 'Uten navn')}</b><small>${t.sources.length} kilde${t.sources.length === 1 ? '' : 'r'} · ${wc} ord</small></div><button class="iconbtn" aria-label="Slett">🗑</button>`;
+    li.innerHTML = `<span class="avatar">${ic('auto_stories')}</span><div class="t"><b>${esc(t.name || 'Uten navn')}</b><small>${t.sources.length} kilde${t.sources.length === 1 ? '' : 'r'} · ${wc} ord</small></div><button class="iconbtn" aria-label="Slett">${ic('delete')}</button>`;
     li.onclick = e => { if (e.target.closest('button')) { if (confirm(`Slette «${t.name}»?`)) { topics = topics.filter(x => x !== t); saveTopics(); renderTopics(); } return; } openTopic(t, t.sources.length ? 'chat' : 'material'); };
     ul.appendChild(li);
   });
@@ -444,7 +578,7 @@ function renderSources() {
   const ul = $('#sourceList'); ul.innerHTML = cur.sources.length ? '' : '<li class="empty">Ingen kilder ennå. Ta bilde av sidene, last opp PDF eller lim inn tekst.</li>';
   cur.sources.forEach(s => {
     const li = document.createElement('li');
-    li.innerHTML = `<div class="h"><b>${esc(s.name)}</b><button class="iconbtn" data-a="edit" aria-label="Rediger">✏</button><button class="iconbtn" data-a="del" aria-label="Slett">🗑</button></div><pre>${esc(s.text.slice(0, 1500))}${s.text.length > 1500 ? ' …' : ''}</pre>`;
+    li.innerHTML = `<div class="h">${ic(s.url && /wikipedia\.org/.test(s.url) ? 'travel_explore' : s.url ? 'link' : 'description', 'kind')}<b>${esc(s.name)}</b>${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" aria-label="Åpne kilden">${ic('open_in_new')}</a>` : ''}<button class="iconbtn" data-a="edit" aria-label="Rediger">${ic('edit')}</button><button class="iconbtn" data-a="del" aria-label="Slett">${ic('delete')}</button></div><pre>${esc(s.text.slice(0, 1500))}${s.text.length > 1500 ? ' …' : ''}</pre>`;
     li.querySelector('[data-a=del]').onclick = () => { if (confirm('Fjerne denne kilden?')) { cur.sources = cur.sources.filter(x => x !== s); touch(); renderSources(); } };
     li.querySelector('[data-a=edit]').onclick = () => {
       const pre = li.querySelector('pre'); if (!pre) return;
@@ -456,7 +590,7 @@ function renderSources() {
     ul.appendChild(li);
   });
   const wc = words(cur.sources.map(s => s.text).join(' ')).length;
-  $('#wordCount').textContent = cur.sources.length ? `Totalt ${wc} ord. Tips: trykk ✏ for å rette opp feil i teksten fra bilder.` : '';
+  $('#wordCount').textContent = cur.sources.length ? `Totalt ${wc} ord. Tips: trykk på blyanten for å rette opp feil i teksten fra bilder.` : '';
 }
 
 /* ---------- samtale ---------- */
@@ -524,10 +658,10 @@ async function sendChat(text) {
       const hits = searchSentences(text, docText(), 3);
       reply = hits.length ? 'Fra stoffet ditt:\n' + hits.join('\n') : 'Jeg fant ikke noe om det i stoffet ditt.';
     }
-  } catch (e) { reply = '⚠ ' + e.message; }
+  } catch (e) { reply = 'Feil: ' + e.message; }
   pending.textContent = reply; cur.chat.push({ role: 'model', text: reply }); saveTopics();
   chatBusy = false;
-  if ($('#speakReplies').checked && !reply.startsWith('⚠')) {
+  if ($('#speakReplies').checked && !reply.startsWith('Feil: ')) {
     const done = await speak(reply);
     if (done && $('#conversationMode').checked && !$('[data-pane=chat]').hidden) micChat();
   }
@@ -613,7 +747,7 @@ function liveBotText(t) {
 }
 async function startLive() {
   if (live.on) return stopLive();
-  if (!hasKey()) { toast('Live-samtale trenger AI – legg inn nøkkel under ⚙', 4000); return; }
+  if (!hasKey()) { toast('Live-samtale trenger AI – legg inn nøkkel under Innstillinger', 4000); return; }
   stopSpeaking(); stopPlayer(); stopListening();
   live.on = true; live.setupDone = false; setLiveState('connect', 'Kobler til …');
   try {
@@ -677,7 +811,7 @@ function openLiveSocket() {
     if (!live.setupDone && live.ai < live.attempts.length - 1 && e.code !== 1006) { live.ai++; openLiveSocket(); return; }
     const why = e.code === 1006 && !live.setupDone ? 'Fikk ikke kontakt med AI-tjenesten.' : e.reason ? e.reason : 'Forbindelsen ble lukket.';
     const quota = /quota|exhaust|rate/i.test(e.reason || '');
-    stopLive(); addMsg('sys', '⚠ ' + (quota ? 'Gratiskvoten for live-samtale er brukt opp for nå. Prøv igjen senere, eller bruk vanlig samtale under.' : why + ' Trykk på mikrofonen for å fortsette.'));
+    stopLive(); addMsg('sys', (quota ? 'Gratiskvoten for live-samtale er brukt opp for nå. Prøv igjen senere, eller bruk vanlig samtale under.' : why + ' Trykk på mikrofonen for å fortsette.'));
   };
 }
 function stopLive() {
@@ -715,7 +849,7 @@ Svar som JSON: {"questions":[{"type":"mc"|"open","question":"…","options":["�
       qs.forEach(q => { if (q.type === 'mc' && (!Array.isArray(q.options) || q.options.length < 2)) q.type = 'open'; if (q.type === 'mc') { q.correct = Math.max(0, Math.min(q.options.length - 1, +q.correct || 0)); q.answer ||= q.options[q.correct]; } });
     } else qs = clozeQuiz(docText(), count);
     if (!qs.length) throw new Error('Fikk ikke laget spørsmål – er det nok tekst i stoffet?');
-  } catch (e) { run.innerHTML = `<p class="fb bad">⚠ ${esc(e.message)}</p><button class="btn wide" onclick="resetQuiz()">Tilbake</button>`; return; }
+  } catch (e) { run.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p><button class="btn wide" onclick="resetQuiz()">Tilbake</button>`; return; }
   quiz = { qs, i: 0, mode, results: [] };
   showQuestion();
 }
@@ -724,10 +858,10 @@ function showQuestion() {
   const q = quiz.qs[quiz.i], run = $('#quizRun');
   run.innerHTML = `<div class="progress"><i style="width:${(quiz.i / quiz.qs.length) * 100}%"></i></div>
   <div class="qcard"><div class="num">Spørsmål ${quiz.i + 1} av ${quiz.qs.length}</div><div class="q">${esc(q.question)}</div>
-  <div class="row qtools"><button class="btn ghost small" id="qSay">🔊 Les opp</button>${q.hint ? '<button class="btn ghost small" id="qHint">💡 Hint</button>' : ''}</div><div id="qHintOut"></div>
-  ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}">${LETTERS[k]}: ${esc(o)}</button>`).join('')}</div>`
+  <div class="row qtools"><button class="btn ghost small" id="qSay">${ic('volume_up')} Les opp</button>${q.hint ? `<button class="btn ghost small" id="qHint">${ic('lightbulb')} Hint</button>` : ''}</div><div id="qHintOut"></div>
+  ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}"><span class="key">${LETTERS[k]}</span><span>${esc(o)}</span></button>`).join('')}</div>`
       : `<textarea id="openAns" rows="3" placeholder="Skriv svaret ditt"></textarea>`}
-  ${quiz.mode === 'oral' || q.type === 'open' ? `<div class="row" style="margin-top:10px">${quiz.mode === 'oral' ? '<button class="btn" id="qMic">' + MIC + ' Svar muntlig</button><button class="btn ghost" id="qRepeat">🔁 Les opp igjen</button>' : ''}${q.type === 'open' ? '<button class="btn primary" id="qSubmit">Svar</button>' : ''}</div>` : ''}
+  ${quiz.mode === 'oral' || q.type === 'open' ? `<div class="row" style="margin-top:10px">${quiz.mode === 'oral' ? '<button class="btn" id="qMic">' + MIC + ' Svar muntlig</button><button class="btn ghost" id="qRepeat">' + ic('replay') + ' Les opp igjen</button>' : ''}${q.type === 'open' ? '<button class="btn primary" id="qSubmit">Svar</button>' : ''}</div>` : ''}
   <div id="qFb"></div></div>
   <div class="row" style="margin-top:12px"><button class="btn ghost" id="qQuit">Avslutt</button><span style="flex:1"></span><button class="btn" id="qSkip">Hopp over</button></div>`;
   $$('.opts button', run).forEach(b => b.onclick = () => answerMC(+b.dataset.k));
@@ -735,7 +869,7 @@ function showQuestion() {
   $('#qQuit').onclick = finishQuiz;
   const sayQ = () => speak(q.question + (q.type === 'mc' ? '. ' + q.options.map((o, k) => `${LETTERS[k]}: ${o}.`).join(' ') : ''));
   $('#qSay').onclick = sayQ;
-  $('#qHint') && ($('#qHint').onclick = () => { $('#qHintOut').innerHTML = `<div class="fb part">💡 ${esc(q.hint)}</div>`; if (settings.autoRead || quiz.mode === 'oral') speak(q.hint); });
+  $('#qHint') && ($('#qHint').onclick = () => { $('#qHintOut').innerHTML = `<div class="fb part">${ic('lightbulb')}${esc(q.hint)}</div>`; if (settings.autoRead || quiz.mode === 'oral') speak(q.hint); });
   if (quiz.mode !== 'oral' && settings.autoRead) sayQ();
   $('#qSkip').onclick = () => { stopSpeaking(); stopListening(); record(false, '(hoppet over)'); nextQ(); };
   if (quiz.mode === 'oral') {
@@ -769,7 +903,7 @@ function answerMC(k) {
   const q = quiz.qs[quiz.i]; if (q.done) return;
   const ok = k === q.correct; record(ok, q.options[k]);
   $$('.opts button').forEach((b, i) => { b.disabled = true; if (i === q.correct) b.classList.add('right'); else if (i === k) b.classList.add('wrong'); });
-  feedback(ok ? 'ok' : 'bad', ok ? 'Riktig! 🎉' : `Feil. Riktig svar er ${LETTERS[q.correct]}: ${q.options[q.correct]}.`, q);
+  feedback(ok ? 'ok' : 'bad', ok ? 'Riktig!' : `Feil. Riktig svar er ${LETTERS[q.correct]}: ${q.options[q.correct]}.`, q);
 }
 async function answerOpen(given) {
   const q = quiz.qs[quiz.i]; given = (given || '').trim(); if (q.done || !given) return;
@@ -785,14 +919,14 @@ async function answerOpen(given) {
       const hit = aw.filter(w => gw.some(g => g.startsWith(w.slice(0, 5)))).length / Math.max(1, aw.length);
       verdict = hit > .7 ? 'ok' : hit > .3 ? 'part' : 'bad';
     }
-  } catch (e) { $('#qFb').innerHTML = `<p class="fb bad">⚠ ${esc(e.message)}</p>`; $('#qSubmit') && ($('#qSubmit').disabled = false); return; }
+  } catch (e) { $('#qFb').innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; $('#qSubmit') && ($('#qSubmit').disabled = false); return; }
   record(verdict === 'ok', given, verdict === 'part');
-  const head = verdict === 'ok' ? 'Riktig! 🎉' : verdict === 'part' ? 'Delvis riktig.' : 'Ikke helt.';
+  const head = verdict === 'ok' ? 'Riktig!' : verdict === 'part' ? 'Delvis riktig.' : 'Ikke helt.';
   feedback(verdict, `${head} ${comment}${verdict !== 'ok' ? ' Riktig svar: ' + q.answer : ''}`, q);
 }
 function feedback(cls, text, q) {
   $('#qFb').innerHTML = `<div class="fb ${cls}">${esc(text)}${q.explanation ? '<br>' + esc(q.explanation) : ''}${q.quote ? `<span class="quote">«${esc(q.quote)}»</span>` : ''}</div>
-    <button class="btn primary wide" id="qNext">${quiz.i + 1 < quiz.qs.length ? 'Neste spørsmål →' : 'Se resultat'}</button>`;
+    <button class="btn primary wide" id="qNext">${quiz.i + 1 < quiz.qs.length ? 'Neste spørsmål' : 'Se resultat'}</button>`;
   $('#qNext').onclick = () => { stopSpeaking(); nextQ(); };
   if (quiz.mode === 'oral') { const my = quiz.i; speak(text).then(done => { if (done && quiz && quiz.i === my) nextQ(); }); }
 }
@@ -802,7 +936,7 @@ function finishQuiz() {
   const n = quiz.results.length, pts = quiz.results.reduce((a, r) => a + (r.ok ? 1 : r.partial ? .5 : 0), 0);
   const missed = quiz.results.filter(r => !r.ok);
   const pct = n ? Math.round(pts / n * 100) : 0;
-  $('#quizRun').innerHTML = `<div class="qcard"><div class="score">${pts} / ${n}</div><p style="text-align:center">${pct >= 90 ? 'Strålende! 🌟' : pct >= 70 ? 'Godt jobbet! 👍' : pct >= 40 ? 'Bra start – øv litt til 💪' : 'Dette temaet trenger mer øving 📚'}</p>
+  $('#quizRun').innerHTML = `<div class="qcard"><span class="trophy">${ic('emoji_events')}</span><div class="score">${pts} / ${n}</div><p style="text-align:center">${pct >= 90 ? 'Strålende!' : pct >= 70 ? 'Godt jobbet!' : pct >= 40 ? 'Bra start – øv litt til' : 'Dette temaet trenger mer øving'}</p>
     ${missed.length ? '<h3>Dette bør du øve mer på</h3>' + missed.map(r => `<div class="fb bad"><b>${esc(r.q.question)}</b><br>Ditt svar: ${esc(r.given)}<br>Riktig: ${esc(r.q.answer)}</div>`).join('') : ''}
     ${missed.length ? '<button class="btn primary wide" id="qRetry">Øv på det jeg bommet på</button>' : ''}
     <button class="btn wide" id="qNew">Ny quiz</button></div>`;
@@ -824,10 +958,10 @@ Struktur: en kort innledning som sier hva foredraget handler om, deretter 3–6 
 Forklar sammenhenger og gjenta nøkkelbegreper så de fester seg. Bruk bare fakta fra stoffet. Ingen lister, bare avsnitt.`, { system: groundRules(), temp: 0.6 });
     else t = '# Viktige punkter fra stoffet\n' + keySentences(docText(), Math.round(wordsN / 22)).join('\n\n');
     cur.cache.lecture = t; saveTopics();
-    out.innerHTML = '<div class="row"><button class="btn" id="lPlay">▶ Les opp</button></div>' + md(t);
+    out.innerHTML = '<div class="row"><button class="btn" id="lPlay">' + ic('play_arrow') + ' Les opp</button></div>' + md(t);
     $('#lPlay').onclick = () => startReading(out);
     startReading(out);
-  } catch (e) { out.innerHTML = `<p class="fb bad">⚠ ${esc(e.message)}</p>`; }
+  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
 }
 async function makeSummary() {
   const out = $('#summaryOut'), len = segVal('summaryLen');
@@ -842,10 +976,10 @@ async function makeSummary() {
       t = keySentences(docText(), n).map(s => (len === 'stikkord' ? '- ' : '') + s).join('\n\n');
     }
     cur.cache.summary = t; saveTopics();
-    out.innerHTML = '<div class="row"><button class="btn" id="sPlay">🔊 Les opp</button><button class="btn ghost" id="sCopy">📋 Kopier</button></div>' + md(t);
+    out.innerHTML = '<div class="row"><button class="btn" id="sPlay">' + ic('volume_up') + ' Les opp</button><button class="btn ghost" id="sCopy">' + ic('content_copy') + ' Kopier</button></div>' + md(t);
     $('#sPlay').onclick = () => startReading(out);
     $('#sCopy').onclick = () => navigator.clipboard?.writeText(t).then(() => toast('Kopiert'));
-  } catch (e) { out.innerHTML = `<p class="fb bad">⚠ ${esc(e.message)}</p>`; }
+  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
 }
 
 /* ---------- faktasjekk mot Wikipedia ---------- */
@@ -880,13 +1014,13 @@ JSON: {"results":[{"claim":"…","quote":"…","verdict":"stemmer"|"avvik"|"ukje
     const res = r.results || [];
     const bad = res.filter(x => x.verdict === 'avvik'), ok = res.filter(x => x.verdict === 'stemmer'), unk = res.filter(x => x.verdict === 'ukjent');
     const src = x => { const p = pages[(parseInt(String(x.source).replace(/\D/g, '')) || 1) - 1]; return p ? ` <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)} (${p.lang})</a>` : ''; };
-    let html = `<h3>${bad.length ? `⚠ ${bad.length} mulig${bad.length === 1 ? '' : 'e'} feil funnet` : '✅ Fant ingen feil'}</h3>`;
+    let html = `<h3>${bad.length ? `${ic('error')} ${bad.length} mulig${bad.length === 1 ? '' : 'e'} feil funnet` : `${ic('check_circle')} Fant ingen feil`}</h3>`;
     html += bad.map(x => `<div class="issue"><b>Stoffet sier:</b> «${esc(x.quote || x.claim)}»<br><b>Wikipedia:</b> ${esc(x.explanation)}${src(x)}</div>`).join('');
     if (ok.length) html += `<h3>Stemmer med Wikipedia (${ok.length})</h3>` + ok.map(x => `<div class="issue ok">${esc(x.claim)}${src(x)}</div>`).join('');
     if (unk.length) html += `<p class="muted small">${unk.length} påstand${unk.length === 1 ? '' : 'er'} ble ikke funnet i artiklene som ble sjekket.</p>`;
     html += '<p class="muted small">Wikipedia kan også ta feil. Spør læreren hvis du er usikker. Appen fortsetter å bruke stoffet ditt slik det står.</p>';
     cur.cache.check = html; saveTopics(); out.innerHTML = html;
-  } catch (e) { out.innerHTML = `<p class="fb bad">⚠ ${esc(e.message)}</p>`; }
+  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
 }
 
 /* ---------- innstillinger ---------- */
@@ -901,21 +1035,21 @@ function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
   $('#textSize').value = settings.textSize || 1; $('#fontSel').value = settings.font || ''; $('#autoRead').checked = !!settings.autoRead;
   $('#liveVoiceSel').innerHTML = LIVE_VOICES.map(v => `<option${v === (settings.liveVoice || 'Kore') ? ' selected' : ''}>${v}</option>`).join('');
-  $('#builtinAi').textContent = PROXY ? '✅ Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
+  $('#builtinAi').textContent = PROXY ? 'Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
 $('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; settings.textSize = +$('#textSize').value; settings.font = $('#fontSel').value; settings.autoRead = $('#autoRead').checked; applyReading(); saveSettings(); renderTopics(); toast('Lagret'); };
 $('#testKey').onclick = async () => {
   const old = { ...settings }; settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim();
   $('#testOut').textContent = 'Tester …';
-  try { const r = await gemini('Svar bare med ordet: OK'); $('#testOut').textContent = '✅ Nøkkelen virker! (' + r.slice(0, 20) + ')'; }
-  catch (e) { $('#testOut').textContent = '❌ ' + (e.message === 'NOKEY' ? 'Skriv inn en nøkkel først.' : e.message); Object.assign(settings, old); }
+  try { const r = await gemini('Svar bare med ordet: OK'); $('#testOut').textContent = 'AI-tilkoblingen virker. (' + r.slice(0, 20) + ')'; }
+  catch (e) { $('#testOut').textContent = 'Virket ikke: ' + (e.message === 'NOKEY' ? 'Skriv inn en nøkkel først.' : e.message); Object.assign(settings, old); }
 };
 
 /* ---------- installering ---------- */
 let deferredPrompt = null;
 addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; if (!isStandalone()) $('#installBtn').hidden = false; });
-addEventListener('appinstalled', () => { $('#installBtn').hidden = true; toast('Leksehjelp er installert 🎉'); });
+addEventListener('appinstalled', () => { $('#installBtn').hidden = true; toast('Leksehjelp er installert'); });
 $('#installBtn').onclick = async () => {
   if (deferredPrompt) { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; $('#installBtn').hidden = true; }
   else if (isIOS) $('#iosInstall').showModal();
@@ -959,8 +1093,26 @@ $('#addCamera').onclick = () => $('#cameraInput').click();
 $('#addFile').onclick = () => $('#fileInput').click();
 $('#cameraInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
 $('#fileInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
-$('#addPaste').onclick = () => { $('#pasteBox').hidden = false; $('#pasteText').focus(); };
-$('#pasteCancel').onclick = () => { $('#pasteBox').hidden = true; $('#pasteText').value = ''; };
+function showPanel(id) {
+  const ids = { pasteBox: 'addPaste', linkBox: 'addLink', wikiBox: 'addWiki' };
+  for (const [p, t] of Object.entries(ids)) { const on = p === id && $('#' + p).hidden; $('#' + p).hidden = !on; $('#' + t).classList.toggle('on', on); }
+}
+$('#addPaste').onclick = () => { showPanel('pasteBox'); if (!$('#pasteBox').hidden) $('#pasteText').focus(); };
+$('#pasteCancel').onclick = () => { showPanel(null); $('#pasteText').value = ''; };
+$('#addLink').onclick = () => { showPanel('linkBox'); if (!$('#linkBox').hidden) $('#linkInput').focus(); };
+$('#linkCancel').onclick = () => { showPanel(null); $('#linkInput').value = ''; };
+$('#linkBox').onsubmit = async e => { e.preventDefault(); const v = $('#linkInput').value; if (await importUrl(v)) { $('#linkInput').value = ''; showPanel(null); } };
+$('#addWiki').onclick = () => { showPanel('wikiBox'); if (!$('#wikiBox').hidden) { if (!$('#wikiQuery').value && cur.name) $('#wikiQuery').value = cur.name; $('#wikiQuery').focus(); } };
+$('#wikiForm').onsubmit = e => { e.preventDefault(); $('#wikiQuery').blur(); wikiSearch($('#wikiQuery').value); };
+$('#wikiLang').onclick = e => { const b = e.target.closest('button'); if (!b) return; wikiLang = b.dataset.l; $$('#wikiLang button').forEach(x => x.classList.toggle('on', x === b)); if ($('#wikiQuery').value.trim()) wikiSearch($('#wikiQuery').value); };
+$('#homeSearch').onsubmit = e => {
+  e.preventDefault(); const q = $('#homeQuery').value.trim(); if (!q) { $('#homeQuery').focus(); return; }
+  const t = { id: uid(), name: '', sources: [], created: Date.now(), updated: Date.now(), chat: [], cache: {} }; topics.push(t); saveTopics();
+  openTopic(t, 'material'); $('#homeQuery').value = '';
+  showPanel('wikiBox'); $('#wikiQuery').value = q; wikiSearch(q);
+};
+// Lim inn lenke rett i tekstfeltet → tilby å hente den
+$('#pasteText').addEventListener('paste', e => { const t = (e.clipboardData?.getData('text') || '').trim(); if (/^https?:\/\/\S+$/.test(t) && !$('#pasteText').value) { e.preventDefault(); showPanel('linkBox'); $('#linkInput').value = t; toast('Det var en lenke – trykk «Hent» for å hente innholdet'); } });
 $('#pasteSave').onclick = () => {
   const t = $('#pasteText').value.trim(); if (!t) return;
   cur.sources.push({ id: uid(), name: 'Tekst ' + (cur.sources.length + 1), text: t });
