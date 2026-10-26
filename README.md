@@ -10,6 +10,6 @@ Studer og pugg et tema basert på ditt eget stoff. Legg inn tekst, PDF eller bil
 
 Appen holder seg til faktaene i stoffet du gir den. Norsk som standard, engelsk når du ber om det.
 
-**Åpne appen:** https://khalm.github.io/leksehjelp/
+**Åpne appen:** https://khalm.github.io/Leksehjelp/
 
 For full funksjon: legg inn en gratis Gemini-nøkkel fra https://aistudio.google.com/apikey under ⚙.
