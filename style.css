@@ -115,3 +115,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .livestatus{font-weight:600;text-align:center}
 .livebox .toggle{font-size:.85rem;color:var(--muted)}
 details{margin-top:8px}
+
+.levelbar{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 12px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.levelbar input{flex:1;accent-color:var(--brand);min-height:32px}
+.levelbar b{min-width:84px;text-align:right;white-space:nowrap}
+.lvlend{font-size:1.1rem}

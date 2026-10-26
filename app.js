@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -149,6 +149,16 @@ function docText(t = cur) {
   const s = t.sources.map((x, i) => `### Kilde ${i + 1}: ${x.name}\n${x.text}`).join('\n\n');
   return s.length > MAX_DOC_CHARS ? s.slice(0, MAX_DOC_CHARS) + '\n[…stoffet er forkortet…]' : s;
 }
+const LEVELS = [
+  null,
+  { name: 'Veldig enkelt', rule: 'SPRÅKNIVÅ 1/5 – VELDIG ENKELT: Forklar som til et barn på 10 år. Bruk korte setninger og vanlige hverdagsord. Unngå fagord – må du bruke ett, forklar det med enkle ord med en gang. Bruk gjerne sammenligninger og eksempler fra hverdagen. Ta bare med det viktigste.' },
+  { name: 'Enkelt', rule: 'SPRÅKNIVÅ 2/5 – ENKELT: Forklar som til en elev på ungdomsskolen. Korte, tydelige setninger. Fagord kan brukes, men forklar dem kort første gang.' },
+  { name: 'Normalt', rule: 'SPRÅKNIVÅ 3/5 – NORMALT: Vanlig, klart språk som passer for videregående skole. Bruk fagbegrepene fra stoffet og forklar dem når det trengs.' },
+  { name: 'Presist', rule: 'SPRÅKNIVÅ 4/5 – PRESIST: Bruk et presist og faglig språk med riktige fagbegreper uten å forenkle. Ta med detaljer, nyanser og sammenhenger fra stoffet. Forklar bare de mest krevende begrepene.' },
+  { name: 'Avansert', rule: 'SPRÅKNIVÅ 5/5 – AVANSERT: Bruk et akademisk, presist og nyansert språk som på universitetsnivå. Bruk fagterminologi fritt og et rikt ordforråd, og vær nøyaktig med presiseringer, forbehold og sammenhenger i stoffet.' },
+];
+const level = () => Math.min(5, Math.max(1, +settings.level || 3));
+function levelRule() { return LEVELS[level()].rule + ' Uansett nivå: forenkling eller presisering skal ALDRI endre eller legge til fakta – bare måten ting forklares på.'; }
 function langRule() {
   return settings.lang === 'en'
     ? 'Write and speak in ENGLISH, even though the study material may be in Norwegian. Translate terms correctly.'
@@ -161,6 +171,7 @@ VIKTIGE REGLER:
 - Hvis noe ikke står i stoffet, si tydelig at det ikke står i stoffet (du kan si at eleven kan spørre læreren eller slå det opp).
 - Gjengi fakta slik de står i stoffet, selv om du tror noe annet er riktig. Hvis du mener stoffet tar feil, kan du kort nevne at eleven kan bruke «Sjekk»-fanen.
 - ${langRule()}
+- ${levelRule()}
 STUDIESTOFF (tema: ${cur.name || 'uten navn'}):
 """
 ${docText()}
@@ -523,6 +534,7 @@ function liveSystem() {
   const recent = cur.chat.slice(-12).map(m => (m.role === 'user' ? 'Eleven: ' : 'Du: ') + m.text).join('\n');
   return `Du er Leksehjelp, en varm, tålmodig og engasjert studiehjelper i en LIVE muntlig samtale med en elev om temaet «${cur.name || 'temaet'}».
 SPRÅK: Snakk norsk bokmål med naturlig norsk uttale. Hvis eleven ber deg snakke engelsk, bytt til engelsk og fortsett på engelsk til eleven ber om norsk igjen.
+${levelRule()} Hvis eleven ber deg forklare enklere eller mer avansert, juster deg etter det.
 FAKTA: Bruk KUN fakta fra STUDIESTOFFET under. Ikke finn på eller legg til fakta, tall, navn eller årstall. Står noe ikke i stoffet, si det rett ut. Gjengi fakta slik de står i stoffet.
 STIL: Dette er en muntlig samtale – svar kort og naturlig (som regel 1–4 setninger), snakk som en hyggelig lærer, ikke som en tekst. Ingen lister eller opplesning av overskrifter. Still gjerne oppfølgingsspørsmål for å sjekke at eleven har forstått.
 Eleven kan be deg om:
@@ -884,6 +896,13 @@ $('#langBtn').onclick = () => {
   else if (!live.on) stopLive();
 };
 $('#liveBtn').onclick = startLive;
+function showLevel() { $('#levelRange').value = level(); $('#levelName').textContent = LEVELS[level()].name; }
+$('#levelRange').oninput = () => { settings.level = +$('#levelRange').value; showLevel(); };
+$('#levelRange').onchange = () => {
+  saveSettings();
+  if (live.on && live.setupDone && live.ws?.readyState === 1) live.ws.send(JSON.stringify({ realtimeInput: { text: '(Eleven har endret språknivå. Fra nå: ' + LEVELS[level()].rule + ' Ikke kommenter endringen, bare fortsett.)' } }));
+  toast('Språknivå: ' + LEVELS[level()].name + ' – gjelder nye svar');
+};
 $('#liveStop').onclick = stopLive;
 $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: [], created: Date.now(), updated: Date.now(), chat: [], cache: {} }; topics.push(t); saveTopics(); openTopic(t, 'material'); $('#topicName').focus(); };
 $('#topicName').oninput = e => { cur.name = e.target.value.trim(); $('#title').textContent = cur.name || 'Nytt tema'; cur.updated = Date.now(); saveTopics(); };
@@ -913,7 +932,7 @@ $('#runCheck').onclick = runCheck;
 (async () => {
   $('#versionLabel').textContent = 'Versjon ' + VERSION;
   await loadAll();
-  setLang(settings.lang || 'no');
+  setLang(settings.lang || 'no'); showLevel();
   if (isIOS && !isStandalone()) $('#installBtn').hidden = false;
   showHome();
   if ('serviceWorker' in navigator) {
