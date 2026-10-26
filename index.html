@@ -157,7 +157,8 @@
 <dialog id="settings">
   <form method="dialog" class="dlg">
     <h2>Innstillinger</h2>
-    <label class="field">Gemini API-nøkkel (gratis)
+    <p class="small" id="builtinAi"></p>
+    <label class="field">Egen Gemini API-nøkkel (valgfritt)
       <input id="apiKey" type="password" autocomplete="off" placeholder="AIza…">
     </label>
     <p class="small muted">Lag en gratis nøkkel på <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (logg inn med Google-konto, trykk «Create API key»). Nøkkelen lagres bare på denne telefonen. Merk: på gratisnivået kan Google bruke det du sender til å forbedre tjenestene sine – ikke legg inn personopplysninger.</p>
@@ -188,6 +189,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const FALLBACK_MODEL = 'gemini-2.5-flash';
 const MAX_DOC_CHARS = 400000;
@@ -41,7 +41,8 @@ const store = (() => {
 const settings = { apiKey: '', model: '', voice: '', lang: 'no' };
 let topics = [];
 let cur = null; // gjeldende tema
-const hasKey = () => !!settings.apiKey;
+const PROXY = (window.LEKSEHJELP_PROXY || '').replace(/\/$/, '');
+const hasKey = () => !!settings.apiKey || !!PROXY;
 
 async function loadAll() {
   Object.assign(settings, (await store.get('settings')) || {});
@@ -73,8 +74,9 @@ async function gemini(parts, { system = '', json = false, temp = 0.4, history = 
   let lastErr;
   for (const m of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey }, body: JSON.stringify(body),
+      const direct = !!settings.apiKey;
+      const r = await fetch(direct ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent` : `${PROXY}/gemini/${encodeURIComponent(m)}`, {
+        method: 'POST', headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       }).catch(e => ({ ok: false, status: 0, _e: e }));
       if (r.ok) {
         const d = await r.json();
@@ -85,8 +87,8 @@ async function gemini(parts, { system = '', json = false, temp = 0.4, history = 
       }
       let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
       if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); break; }
-      if (r.status === 400 && /API key/i.test(msg)) throw new Error('API-nøkkelen er ugyldig. Sjekk den under ⚙.');
-      if (r.status === 403) throw new Error('Nøkkelen har ikke tilgang. Sjekk den under ⚙.');
+      if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under ⚙.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
+      if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
       if (r.status === 429 || r.status === 503 || r.status === 500 || r.status === 0) {
         lastErr = new Error(r.status === 429 ? 'Gratiskvoten er brukt opp akkurat nå. Vent litt og prøv igjen.' : r.status === 0 ? 'Ingen nettforbindelse.' : 'Google er opptatt akkurat nå. Prøv igjen.');
         await sleep(1500 * (attempt + 1)); continue;
@@ -653,6 +655,7 @@ function fillVoiceSelect() {
 }
 function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; fillVoiceSelect(); $('#testOut').textContent = '';
+  $('#builtinAi').textContent = PROXY ? '✅ Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
 $('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; saveSettings(); renderTopics(); toast('Lagret'); };

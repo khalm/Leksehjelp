@@ -1,0 +1,39 @@
+name: Deploy AI-proxy (Cloudflare Worker)
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/worker.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: worker
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GEMINI_KEY: ${{ secrets.LEKSEHJELP_GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sjekk secrets
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Mangler secret CLOUDFLARE_API_TOKEN i dette repoet"; exit 1; }
+          [ -n "$GEMINI_KEY" ] || { echo "::error::Mangler secret LEKSEHJELP_GEMINI_API_KEY"; exit 1; }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Deploy worker
+        working-directory: worker
+        run: |
+          npx --yes wrangler@3 deploy 2>&1 | tee deploy.log
+          printf '%s' "$GEMINI_KEY" | npx --yes wrangler@3 secret put GEMINI_API_KEY
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          [ -n "$URL" ] || { echo "::error::Fant ikke worker-URL"; exit 1; }
+          echo "WORKER_URL=$URL" >> "$GITHUB_ENV"
+      - name: Skriv config.js
+        run: |
+          printf "// Laget automatisk av worker.yml\nwindow.LEKSEHJELP_PROXY = '%s';\n" "$WORKER_URL" > config.js
+          if ! git diff --quiet -- config.js; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git add config.js && git commit -m "Oppdater AI-proxy-adresse" && git push
+          fi
