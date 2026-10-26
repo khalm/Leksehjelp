@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.8.2';
+const VERSION = '1.8.3';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -590,10 +590,10 @@ async function addWikiArticle(lang, title) {
 }
 
 /* ---------- navigasjon ---------- */
-/* Temaer uten stoff (opprettet, men aldri fylt) fjernes så de ikke hoper seg opp */
+/* Temaer uten stoff og uten navn (opprettet, men aldri brukt) fjernes så de ikke hoper seg opp */
 function pruneEmpty() {
   const before = topics.length;
-  topics = topics.filter(t => t === cur || t.sources.length);
+  topics = topics.filter(t => t === cur || t.sources.length || (t.name || '').trim());
   if (topics.length !== before) saveTopics();
 }
 function showHome() {
