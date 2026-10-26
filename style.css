@@ -232,3 +232,40 @@ dialog::backdrop{background:rgba(10,14,22,.5);backdrop-filter:blur(3px)}
 :root[data-font=atkinson]{--font:"Atkinson Hyperlegible",system-ui,sans-serif}
 :root[data-font] .readout p,:root[data-font] .msg{line-height:1.75;word-spacing:.08em}
 :root[data-font=lexend] body{letter-spacing:.01em}
+
+/* Spillmodus */
+.center{text-align:center}
+.hud{display:flex;justify-content:space-between;align-items:center;margin:0 0 10px;font-size:.9rem;color:var(--muted)}
+.hud b{color:var(--ink);font-size:1.1rem;margin:0 4px 0 2px;font-variant-numeric:tabular-nums}
+.hud .ms{font-size:22px}
+.hud-pts .ms{color:var(--accent)}
+.hud-streak .ms{color:var(--muted);transition:color .2s,transform .2s}
+.hud-streak.hot .ms{color:#f2622e;transform:scale(1.15)}
+.qcard.pop{animation:pop .45s cubic-bezier(.3,1.6,.5,1)}
+@keyframes pop{0%{transform:scale(1)}35%{transform:scale(1.025)}100%{transform:scale(1)}}
+.qcard.wiggle{animation:wiggle .4s ease}
+@keyframes wiggle{20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-2px)}80%{transform:translateX(2px)}}
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:30;overflow:hidden}
+.confetti i{position:fixed;width:8px;height:12px;border-radius:2px;animation:conf 1.1s cubic-bezier(.2,.7,.4,1) forwards}
+@keyframes conf{0%{transform:translate(0,0) rotate(0);opacity:1}70%{opacity:1}100%{transform:translate(var(--dx),calc(var(--dy) + 140px)) rotate(var(--rot));opacity:0}}
+.floatpts{position:fixed;z-index:31;transform:translate(-50%,0);font-weight:800;font-size:1.3rem;color:var(--accent);text-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none;animation:floatup 1.1s ease-out forwards}
+@keyframes floatup{0%{opacity:0;transform:translate(-50%,6px) scale(.8)}15%{opacity:1;transform:translate(-50%,-6px) scale(1.1)}100%{opacity:0;transform:translate(-50%,-60px) scale(1)}}
+.streakbanner{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:32;background:linear-gradient(135deg,#f2622e,#f0a23b);color:#fff;font-weight:800;font-size:1.5rem;padding:14px 26px;border-radius:999px;box-shadow:0 12px 30px -8px rgba(242,98,46,.7);pointer-events:none;animation:banner 1.6s ease forwards}
+@keyframes banner{0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}15%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}25%{transform:translate(-50%,-50%) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-70%) scale(1)}}
+.result .score{font-variant-numeric:tabular-nums;color:var(--brand)}
+.statrow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.statrow div{background:var(--surface2);border-radius:var(--r-sm);padding:10px 6px;text-align:center}
+.statrow b{display:block;font-size:1.15rem}.statrow small{color:var(--muted);font-size:.78rem}
+.newrecord{display:flex;justify-content:center;align-items:center;gap:6px;margin:6px auto 0;width:max-content;padding:6px 14px;border-radius:999px;background:color-mix(in srgb,var(--accent) 20%,var(--surface));color:#b86d10;font-weight:700;animation:pop .6s cubic-bezier(.3,1.6,.5,1)}
+@media (prefers-color-scheme: dark){.newrecord{color:var(--accent)}}
+.switches{display:grid;gap:4px;margin-top:14px}
+.switch{display:flex;align-items:center;gap:12px;padding:8px 2px;cursor:pointer;font-weight:600;font-size:.95rem}
+.switch small{display:block;font-weight:400;color:var(--muted);font-size:.8rem}
+.switch .ms{color:var(--brand);margin-right:6px;font-size:20px}
+.switch input{position:absolute;opacity:0;pointer-events:none}
+.switch .sw{flex:none;position:relative;width:44px;height:26px;border-radius:999px;background:var(--line);transition:background .2s}
+.switch .sw::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.switch input:checked+.sw{background:var(--brand)}
+.switch input:checked+.sw::after{transform:translateX(18px)}
+.switch input:disabled~span{opacity:.45}
+.switch input:focus-visible+.sw{box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 30%,transparent)}

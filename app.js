@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -39,7 +39,7 @@ const store = (() => {
   return { get, set };
 })();
 
-const settings = { apiKey: '', model: '', voice: '', lang: 'no', level: 4, levelScale: 6, textSize: 1, font: '', autoRead: false };
+const settings = { gameMode: true, gameSound: true, apiKey: '', model: '', voice: '', lang: 'no', level: 4, levelScale: 6, textSize: 1, font: '', autoRead: false };
 let topics = [];
 let cur = null; // gjeldende tema
 const PROXY = (window.LEKSEHJELP_PROXY || '').replace(/\/$/, '');
@@ -865,6 +865,74 @@ function stopLive() {
 }
 
 /* ---------- quiz ---------- */
+/* ---------- spillmodus: lyd, animasjon og poeng ---------- */
+let sfxCtx = null;
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function sfx(kind) {
+  if (!settings.gameMode || !settings.gameSound) return;
+  try {
+    sfxCtx ||= new (window.AudioContext || window.webkitAudioContext)(); sfxCtx.resume();
+    const t0 = sfxCtx.currentTime + 0.02;
+    const tone = (f, t, d, type = 'triangle', v = 0.16) => {
+      const o = sfxCtx.createOscillator(), g = sfxCtx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t0 + t);
+      g.gain.setValueAtTime(0.0001, t0 + t); g.gain.exponentialRampToValueAtTime(v, t0 + t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + t + d);
+      o.connect(g); g.connect(sfxCtx.destination); o.start(t0 + t); o.stop(t0 + t + d + 0.05);
+    };
+    if (kind === 'right') [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, i * 0.07, 0.25));
+    else if (kind === 'streak') { [659.25, 830.61, 987.77, 1318.5].forEach((f, i) => tone(f, i * 0.06, 0.22, 'sine', 0.14)); tone(1760, 0.27, 0.5, 'sine', 0.07); tone(2093, 0.33, 0.45, 'sine', 0.05); }
+    else if (kind === 'part') { tone(523.25, 0, 0.2); tone(659.25, 0.09, 0.3); }
+    else if (kind === 'wrong') { tone(392, 0, 0.2, 'sine', 0.1); tone(349.23, 0.14, 0.32, 'sine', 0.1); }
+    else if (kind === 'finish') [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5].forEach((f, i) => tone(f, i * 0.11, i === 5 ? 0.7 : 0.22, 'triangle', 0.15));
+  } catch { }
+}
+function confetti(el, n = 30) {
+  if (!settings.gameMode || reduceMotion() || !el) return;
+  const r = el.getBoundingClientRect(), box = document.createElement('div'); box.className = 'confetti';
+  const cols = ['#3157d5', '#f0a23b', '#1d9a5b', '#e3477a', '#7d5bd8', '#22b3c9'];
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement('i'), a = Math.random() * Math.PI * 2, d = 50 + Math.random() * 110;
+    p.style.cssText = `left:${r.left + r.width / 2}px;top:${r.top + r.height / 2}px;background:${cols[i % cols.length]};--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 50}px;--rot:${Math.random() * 720 - 360}deg;animation-delay:${Math.random() * 80}ms;${i % 3 ? '' : 'border-radius:50%;'}`;
+    box.appendChild(p);
+  }
+  document.body.appendChild(box); setTimeout(() => box.remove(), 1300);
+}
+function floatPoints(el, txt) {
+  if (!el) return; const r = el.getBoundingClientRect(), f = document.createElement('div');
+  f.className = 'floatpts'; f.textContent = txt; f.style.left = (r.left + r.width / 2) + 'px'; f.style.top = (r.top + 6) + 'px';
+  document.body.appendChild(f); setTimeout(() => f.remove(), 1200);
+}
+function countUp(el, from, to) {
+  if (!el) return; if (reduceMotion()) { el.textContent = to; return; }
+  const t0 = performance.now(), dur = 500;
+  const step = t => { const k = Math.min(1, (t - t0) / dur); el.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+function hudHtml() {
+  if (!settings.gameMode) return '';
+  return `<div class="hud"><span class="hud-pts">${ic('stars')}<b id="hudPts">${quiz.points}</b> poeng</span><span class="hud-streak${quiz.streak >= 2 ? ' hot' : ''}">${ic('local_fire_department')}<b id="hudStreak">${quiz.streak}</b> på rad</span></div>`;
+}
+/* Poeng: 100 for riktig (+20 per svar på rad, maks +100), 50 for delvis riktig. Aldri minuspoeng. */
+function gameAfterAnswer(verdict, target) {
+  if (!settings.gameMode) return;
+  const before = quiz.points; let gained = 0;
+  if (verdict === 'ok') { quiz.streak++; gained = 100 + Math.min(quiz.streak - 1, 5) * 20; }
+  else if (verdict === 'part') { quiz.streak = 0; gained = 50; }
+  else quiz.streak = 0;
+  quiz.points += gained; quiz.bestStreak = Math.max(quiz.bestStreak, quiz.streak);
+  countUp($('#hudPts'), before, quiz.points);
+  const st = $('#hudStreak'); if (st) { st.textContent = quiz.streak; st.parentElement.classList.toggle('hot', quiz.streak >= 2); }
+  const card = $('.qcard');
+  if (verdict === 'ok') {
+    const milestone = [3, 5, 10, 15, 20].includes(quiz.streak);
+    sfx(milestone ? 'streak' : 'right'); confetti(target, milestone ? 60 : 30);
+    floatPoints(target, '+' + gained);
+    if (!reduceMotion()) { card?.classList.remove('pop'); void card?.offsetWidth; card?.classList.add('pop'); }
+    if (milestone) { const b = document.createElement('div'); b.className = 'streakbanner'; b.innerHTML = `${ic('local_fire_department')} ${quiz.streak} på rad!`; document.body.appendChild(b); setTimeout(() => b.remove(), 1600); }
+  } else if (verdict === 'part') { sfx('part'); floatPoints(target, '+' + gained); }
+  else { sfx('wrong'); if (!reduceMotion()) { card?.classList.remove('wiggle'); void card?.offsetWidth; card?.classList.add('wiggle'); } }
+}
+
 let quiz = null, quizGen = null;
 function resetQuiz() { quiz = null; $('#quizSetup').hidden = false; $('#quizRun').hidden = true; $('#quizRun').innerHTML = ''; }
 const quizKey = () => [cur?.id, cur?.updated, level(), settings.lang, segVal('quizMode'), segVal('quizType'), segVal('quizLevel')].join('|');
@@ -915,7 +983,7 @@ async function startQuiz(focus = null) {
   $('#quizSetup').hidden = true; const run = $('#quizRun'); run.hidden = false;
   let gen = !focus && quizGen && quizGen.key === quizKey() && !quizGen.error && quizGen.count >= count ? quizGen : makeQuizGen(focus, count);
   quizGen = null;
-  quiz = { gen, qs: gen.qs, i: 0, mode, count, results: [], waiting: false };
+  quiz = { gen, qs: gen.qs, i: 0, mode, count, results: [], waiting: false, points: 0, streak: 0, bestStreak: 0 };
   const me = quiz;
   gen.subs.add(() => {
     if (quiz !== me) return;
@@ -937,7 +1005,7 @@ function advanceTo() {
 const LETTERS = 'ABCDEFG';
 function showQuestion() {
   const q = quiz.qs[quiz.i], run = $('#quizRun');
-  run.innerHTML = `<div class="progress"><i style="width:${(quiz.i / quizTotal()) * 100}%"></i></div>
+  run.innerHTML = hudHtml() + `<div class="progress"><i style="width:${(quiz.i / quizTotal()) * 100}%"></i></div>
   <div class="qcard"><div class="num">Spørsmål ${quiz.i + 1} av <span id="qTotal">${quizTotal()}</span></div><div class="q">${esc(q.question)}</div>
   <div class="row qtools"><button class="btn ghost small" id="qSay">${ic('volume_up')} Les opp</button>${q.hint ? `<button class="btn ghost small" id="qHint">${ic('lightbulb')} Hint</button>` : ''}</div><div id="qHintOut"></div>
   ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}"><span class="key">${LETTERS[k]}</span><span>${esc(o)}</span></button>`).join('')}</div>`
@@ -984,7 +1052,8 @@ function answerMC(k) {
   const q = quiz.qs[quiz.i]; if (q.done) return;
   const ok = k === q.correct; record(ok, q.options[k]);
   $$('.opts button').forEach((b, i) => { b.disabled = true; if (i === q.correct) b.classList.add('right'); else if (i === k) b.classList.add('wrong'); });
-  feedback(ok ? 'ok' : 'bad', ok ? 'Riktig!' : `Feil. Riktig svar er ${LETTERS[q.correct]}: ${q.options[q.correct]}.`, q);
+  gameAfterAnswer(ok ? 'ok' : 'bad', $$('.opts button')[ok ? k : q.correct]);
+  feedback(ok ? 'ok' : 'bad', ok ? 'Riktig!' : `Ikke helt. Riktig svar er ${LETTERS[q.correct]}: ${q.options[q.correct]}.`, q);
 }
 async function answerOpen(given) {
   const q = quiz.qs[quiz.i]; given = (given || '').trim(); if (q.done || !given) return;
@@ -1002,6 +1071,7 @@ async function answerOpen(given) {
     }
   } catch (e) { $('#qFb').innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; $('#qSubmit') && ($('#qSubmit').disabled = false); return; }
   record(verdict === 'ok', given, verdict === 'part');
+  gameAfterAnswer(verdict, $('#openAns') || $('#qFb'));
   const head = verdict === 'ok' ? 'Riktig!' : verdict === 'part' ? 'Delvis riktig.' : 'Ikke helt.';
   feedback(verdict, `${head} ${comment}${verdict !== 'ok' ? ' Riktig svar: ' + q.answer : ''}`, q);
 }
@@ -1009,7 +1079,7 @@ function feedback(cls, text, q) {
   $('#qFb').innerHTML = `<div class="fb ${cls}">${esc(text)}${q.explanation ? '<br>' + esc(q.explanation) : ''}${q.quote ? `<span class="quote">«${esc(q.quote)}»</span>` : ''}</div>
     <button class="btn primary wide" id="qNext">${quiz.i + 1 < quizTotal() ? 'Neste spørsmål' : 'Se resultat'}</button>`;
   $('#qNext').onclick = () => { stopSpeaking(); nextQ(); };
-  if (quiz.mode === 'oral') { const my = quiz.i; speak(text).then(done => { if (done && quiz && quiz.i === my) nextQ(); }); }
+  if (quiz.mode === 'oral') { const my = quiz.i; (settings.gameMode && settings.gameSound ? sleep(650) : Promise.resolve()).then(() => quiz && quiz.i === my ? speak(text) : false).then(done => { if (done && quiz && quiz.i === my) nextQ(); }); }
 }
 function nextQ() { stopListening(); quiz.i++; advanceTo(); }
 function finishQuiz() {
@@ -1017,11 +1087,20 @@ function finishQuiz() {
   const n = quiz.results.length, pts = quiz.results.reduce((a, r) => a + (r.ok ? 1 : r.partial ? .5 : 0), 0);
   const missed = quiz.results.filter(r => !r.ok);
   const pct = n ? Math.round(pts / n * 100) : 0;
-  $('#quizRun').innerHTML = `<div class="qcard"><span class="trophy">${ic('emoji_events')}</span><div class="score">${pts} / ${n}</div><p style="text-align:center">${pct >= 90 ? 'Strålende!' : pct >= 70 ? 'Godt jobbet!' : pct >= 40 ? 'Bra start – øv litt til' : 'Dette temaet trenger mer øving'}</p>
-    ${missed.length ? '<h3>Dette bør du øve mer på</h3>' + missed.map(r => `<div class="fb bad"><b>${esc(r.q.question)}</b><br>Ditt svar: ${esc(r.given)}<br>Riktig: ${esc(r.q.answer)}</div>`).join('') : ''}
+  const game = settings.gameMode && n;
+  let isRecord = false;
+  if (game) { cur.best ||= 0; if (quiz.points > cur.best) { isRecord = cur.best > 0; cur.best = quiz.points; saveTopics(); } }
+  $('#quizRun').innerHTML = `<div class="qcard result"><span class="trophy">${ic('emoji_events')}</span>
+    ${game ? `<div class="score"><span id="finalPts">0</span></div><p class="center muted" style="margin-top:-6px">poeng</p>
+      <div class="statrow"><div><b>${pts} / ${n}</b><small>riktige</small></div><div><b>${quiz.bestStreak}</b><small>flest på rad</small></div><div><b>${cur.best}</b><small>din rekord</small></div></div>
+      ${isRecord ? `<div class="newrecord">${ic('stars')} Ny rekord!</div>` : ''}`
+    : `<div class="score">${pts} / ${n}</div>`}
+    <p class="center">${pct >= 90 ? 'Strålende!' : pct >= 70 ? 'Godt jobbet!' : pct >= 40 ? 'Bra innsats – øv litt til, så sitter det' : 'Fint at du øver! Prøv igjen, så blir det lettere for hver gang'}</p>
+    ${missed.length ? '<h3>Dette kan du øve mer på</h3>' + missed.map(r => `<div class="fb bad"><b>${esc(r.q.question)}</b><br>Ditt svar: ${esc(r.given)}<br>Riktig: ${esc(r.q.answer)}</div>`).join('') : ''}
     ${missed.length ? '<button class="btn primary wide" id="qRetry">Øv på det jeg bommet på</button>' : ''}
     <button class="btn wide" id="qNew">Ny quiz</button></div>`;
   if (quiz.mode === 'oral') speak(settings.lang === 'en' ? `You got ${pts} out of ${n}.` : `Du fikk ${String(pts).replace('.', ',')} av ${n} poeng.`);
+  if (game) { countUp($('#finalPts'), 0, quiz.points); sfx('finish'); setTimeout(() => confetti($('.trophy'), pct >= 70 || isRecord ? 80 : 40), 150); }
   const focus = missed.map(r => r.q);
   $('#qRetry') && ($('#qRetry').onclick = () => startQuiz(focus));
   $('#qNew').onclick = resetQuiz;
@@ -1114,12 +1193,13 @@ function fillVoiceSelect() {
 }
 function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
+  $('#gameModeS').checked = !!settings.gameMode; $('#gameSoundS').checked = !!settings.gameSound;
   $('#textSize').value = settings.textSize || 1; $('#fontSel').value = settings.font || ''; $('#autoRead').checked = !!settings.autoRead;
   $('#liveVoiceSel').innerHTML = LIVE_VOICES.map(v => `<option${v === (settings.liveVoice || 'Kore') ? ' selected' : ''}>${v}</option>`).join('');
   $('#builtinAi').textContent = PROXY ? 'Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
-$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; settings.textSize = +$('#textSize').value; settings.font = $('#fontSel').value; settings.autoRead = $('#autoRead').checked; applyReading(); saveSettings(); renderTopics(); toast('Lagret'); };
+$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; settings.textSize = +$('#textSize').value; settings.font = $('#fontSel').value; settings.autoRead = $('#autoRead').checked; settings.gameMode = $('#gameModeS').checked; settings.gameSound = $('#gameSoundS').checked; syncGameToggles(); applyReading(); saveSettings(); renderTopics(); toast('Lagret'); };
 $('#testKey').onclick = async () => {
   const old = { ...settings }; settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim();
   $('#testOut').textContent = 'Tester …';
@@ -1205,6 +1285,9 @@ $('#sendBtn').onclick = () => sendChat($('#chatInput').value);
 $('#chatInput').onkeydown = e => { if (e.key === 'Enter') sendChat($('#chatInput').value); };
 $('#micBtn').onclick = micChat;
 $('#startQuiz').onclick = () => startQuiz();
+function syncGameToggles() { $('#gameMode').checked = !!settings.gameMode; $('#gameSound').checked = !!settings.gameSound; $('#gameSound').disabled = !settings.gameMode; }
+$('#gameMode').onchange = () => { settings.gameMode = $('#gameMode').checked; saveSettings(); syncGameToggles(); };
+$('#gameSound').onchange = () => { settings.gameSound = $('#gameSound').checked; saveSettings(); if (settings.gameSound) sfx('right'); };
 $('#makeLecture').onclick = makeLecture;
 $('#makeSummary').onclick = makeSummary;
 $('#runCheck').onclick = runCheck;
@@ -1213,7 +1296,7 @@ $('#runCheck').onclick = runCheck;
 (async () => {
   $('#versionLabel').textContent = 'Versjon ' + VERSION;
   await loadAll();
-  setLang(settings.lang || 'no'); showLevel(); applyReading();
+  setLang(settings.lang || 'no'); showLevel(); applyReading(); syncGameToggles();
   if (isIOS && !isStandalone()) $('#installBtn').hidden = false;
   showHome();
   if ('serviceWorker' in navigator) {
