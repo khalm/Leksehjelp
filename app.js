@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.8.1';
+const VERSION = '1.8.2';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -95,6 +95,19 @@ async function pickModels() {
   } catch { }
   return [DEFAULT_MODEL, 'gemini-3-flash', 'gemini-3-flash-preview'];
 }
+/* Lette, raske modeller for små oppgaver (som å vurdere ett svar) */
+let liteCache = null;
+async function pickLiteModels() {
+  if (liteCache) return liteCache;
+  const main = await pickModels();
+  try {
+    const ver = n => { const v = n.match(/gemini-(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
+    const lites = (await fetchModelList()).filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini/.test(n) && /flash-lite/.test(n) && !/(image|tts|audio|live|embed)/.test(n))
+      .sort((a, b) => ver(b) - ver(a) || (/(preview|exp)/.test(a) ? 1 : 0) - (/(preview|exp)/.test(b) ? 1 : 0));
+    return (liteCache = [...lites.slice(0, 2), ...main]);
+  } catch { return main; }
+}
 /* Live-modeller (sanntids tale), nyeste først. Unngår «thinking»-varianten fordi den svarer tregere. */
 async function pickLiveModels() {
   const fallback = ['gemini-3.8-live', 'gemini-3.1-flash-live-preview'];
@@ -133,13 +146,13 @@ async function readSSE(r, onText) {
   return full;
 }
 async function gemini(parts, opts = {}) {
-  const { system = '', json = false, temp = 0.4, history = null, fast = false, onText = null } = opts;
+  const { system = '', json = false, temp = 0.4, history = null, fast = false, onText = null, lite = false } = opts;
   if (!hasKey()) throw new Error('NOKEY');
   const contents = history ? history : [{ role: 'user', parts: Array.isArray(parts) ? parts : [{ text: parts }] }];
   const body = { contents, generationConfig: { temperature: temp } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (json) body.generationConfig.responseMimeType = 'application/json';
-  const models = settings.model ? [settings.model] : await pickModels();
+  const models = settings.model ? [settings.model] : lite ? await pickLiteModels() : await pickModels();
   const stream = !!onText;
   let lastErr;
   for (const m of models) {
@@ -1062,14 +1075,38 @@ function answerMC(k) {
   gameAfterAnswer(ok ? 'ok' : 'bad', $$('.opts button')[ok ? k : q.correct]);
   feedback(ok ? 'ok' : 'bad', ok ? 'Riktig!' : `Ikke helt. Riktig svar er ${LETTERS[q.correct]}: ${q.options[q.correct]}.`, q);
 }
+/* Rask lokal sjekk: er svaret tydelig likt fasiten, trengs ingen AI */
+const normAns = t => String(t || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9æøå\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function lev(a, b) {
+  if (Math.abs(a.length - b.length) > 6) return 99; const d = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) { let p = d[0]; d[0] = i; for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, p + (a[i - 1] === b[j - 1] ? 0 : 1)); p = t; } }
+  return d[b.length];
+}
+function quickVerdict(answer, given) {
+  const a = normAns(answer), g = normAns(given); if (!a || !g) return null;
+  if (a === g) return 'ok';
+  const nums = x => (x.match(/\d+/g) || []).join(','), an = nums(a);
+  if (an && nums(g) !== an && !g.includes(an)) return null; // tall må stemme – la AI-en avgjøre
+  if (a.length <= 30 && lev(a, g) <= Math.max(1, Math.floor(a.length / 6))) return 'ok';
+  const aw = a.split(' ').filter(w => w.length > 2 && !STOP.has(w)), gw = g.split(' ');
+  if (aw.length && aw.length <= 6 && aw.every(w => gw.some(x => x === w || (w.length > 4 && lev(w, x) <= 1)))) return 'ok';
+  return null;
+}
 async function answerOpen(given) {
   const q = quiz.qs[quiz.i]; given = (given || '').trim(); if (q.done || !given) return;
   $('#qSubmit') && ($('#qSubmit').disabled = true);
   $('#qFb').innerHTML = '<p><span class="spin"></span>Vurderer svaret …</p>';
   let verdict = 'bad', comment = '';
   try {
-    if (hasKey()) {
-      const r = await gemini(`Spørsmål: ${q.question}\nRiktig svar ifølge stoffet: ${q.answer}\nElevens svar: ${given}\nVurder om eleven har forstått det riktige. Vær raus med stavefeil, synonymer og andre ord for det samme (og ord som er feilhørt av talegjenkjenning). JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, oppmuntrende setning til eleven"}`, { system: groundRules(), json: true, temp: 0, fast: true });
+    const quick = quickVerdict(q.answer, given);
+    if (quick) verdict = quick;
+    else if (hasKey()) {
+      const r = await gemini(`Du retter et kort quizsvar for en elev. ${LEVELS[level()].rule.split(':')[0]}.
+Spørsmål: ${q.question}
+Fasit: ${q.answer}${q.explanation ? '\nForklaring: ' + q.explanation : ''}${q.quote ? '\nFra stoffet: ' + q.quote : ''}
+Elevens svar: ${given}
+Er elevens svar riktig ifølge fasiten? Vær raus med stavefeil, synonymer, andre formuleringer og feilhørte ord fra talegjenkjenning. «delvis» hvis noe vesentlig mangler. ${settings.lang === 'en' ? 'Write the comment in English.' : 'Skriv kommentaren på norsk.'}
+JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, vennlig setning"}`, { json: true, temp: 0, fast: true, lite: true });
       verdict = r.verdict === 'riktig' ? 'ok' : r.verdict === 'delvis' ? 'part' : 'bad'; comment = r.comment || '';
     } else {
       const aw = words(q.answer).filter(w => !STOP.has(w)), gw = words(given);
