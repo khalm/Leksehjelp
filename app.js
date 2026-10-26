@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.9.0';
+const VERSION = '1.10.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -219,18 +219,20 @@ function langRule() {
     ? 'Write and speak in ENGLISH, even though the study material may be in Norwegian. Translate terms correctly.'
     : 'Skriv på norsk bokmål.';
 }
+/* Stoffet ligger FØRST og er likt fra gang til gang, så Google kan gjenbruke det (raskere svar) */
 function groundRules() {
-  return `Du er Leksehjelp, en tålmodig og vennlig studiehjelper for elever.
+  return `STUDIESTOFF:
+"""
+${docText()}
+"""
+
+Du er Leksehjelp, en tålmodig og vennlig studiehjelper for elever. Temaet heter «${cur.name || 'uten navn'}».
 VIKTIGE REGLER:
-- Bruk KUN fakta som står i STUDIESTOFFET under. Ikke legg til fakta, tall, navn eller årstall som ikke står der.
+- Bruk KUN fakta som står i STUDIESTOFFET over. Ikke legg til fakta, tall, navn eller årstall som ikke står der.
 - Hvis noe ikke står i stoffet, si tydelig at det ikke står i stoffet (du kan si at eleven kan spørre læreren eller slå det opp).
 - Gjengi fakta slik de står i stoffet, selv om du tror noe annet er riktig. Hvis du mener stoffet tar feil, kan du kort nevne at eleven kan bruke «Sjekk»-fanen.
 - ${langRule()}
-- ${levelRule()}
-STUDIESTOFF (tema: ${cur.name || 'uten navn'}):
-"""
-${docText()}
-"""`;
+- ${levelRule()}`;
 }
 
 /* ---------- tale: gjenkjenning ---------- */
@@ -299,12 +301,33 @@ function speak(text, { rate } = {}) {
   });
 }
 
+/* Kø-opplesning: setninger leses mens teksten fortsatt skrives */
+function speakAppend(text) {
+  if (!('speechSynthesis' in window) || !text.trim()) return;
+  const voice = pickVoice(settings.lang);
+  for (const c of chunkForSpeech(text.replace(/[*#_`]/g, ''))) {
+    const u = new SpeechSynthesisUtterance(c); u.lang = voice?.lang || LANG[settings.lang].sr; if (voice) u.voice = voice;
+    u.rate = (+$('#pRate').value || 1) * LEVELS[level()].slow; speechSynthesis.speak(u);
+  }
+}
+async function waitSpeechIdle() {
+  const my = speakToken;
+  await sleep(150);
+  while (speechSynthesis.speaking || speechSynthesis.pending) { if (my !== speakToken) return false; await sleep(200); }
+  return my === speakToken;
+}
 /* ---------- opplesning med spiller (foredrag/sammendrag) ---------- */
-const player = { items: [], idx: 0, playing: false, token: 0 };
+const player = { items: [], idx: 0, playing: false, token: 0, container: null, live: false };
+const playerItems = () => player.container ? $$('h3,p,li', player.container) : [];
 async function playFrom(i) {
   const my = ++player.token; player.idx = i; player.playing = true;
   $('#player').hidden = false; $('#pPlay').innerHTML = ic('pause');
-  while (player.idx < player.items.length && my === player.token) {
+  for (;;) {
+    if (my !== player.token) return;
+    player.items = playerItems();
+    // Mens teksten fortsatt skrives: vent til avsnittet er ferdig skrevet før det leses
+    if (player.live && player.idx >= player.items.length - 1) { await sleep(250); continue; }
+    if (player.idx >= player.items.length) break;
     const el = player.items[player.idx];
     $$('.speaking').forEach(x => x.classList.remove('speaking'));
     el.classList.add('speaking'); if (!touching && Date.now() - lastUserInput > 5000) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -315,7 +338,8 @@ async function playFrom(i) {
   }
   if (my === player.token) { player.playing = false; $('#pPlay').innerHTML = ic('play_arrow'); $$('.speaking').forEach(x => x.classList.remove('speaking')); }
 }
-function startReading(container) { player.items = $$('h3,p,li', container); if (player.items.length) playFrom(0); }
+function startReading(container) { player.container = container; if (playerItems().length || player.live) playFrom(0); }
+function markSpeaking() { if (player.playing) playerItems()[player.idx]?.classList.add('speaking'); }
 function stopPlayer() { player.token++; player.playing = false; stopSpeaking(); $('#player').hidden = true; $$('.speaking').forEach(x => x.classList.remove('speaking')); }
 $('#pPlay').onclick = () => { if (player.playing) { player.token++; player.playing = false; stopSpeaking(); $('#pPlay').innerHTML = ic('play_arrow'); } else playFrom(player.idx); };
 $('#pNext').onclick = () => playFrom(Math.min(player.idx + 1, player.items.length - 1));
@@ -705,12 +729,19 @@ async function sendChat(text, { hidden = false } = {}) {
   if (!hidden) addMsg('user', text, true); else follow($('#chatLog').lastElementChild || $('#chatLog'), true);
   cur.chat.push({ role: 'user', text, ...(hidden ? { hidden: true } : {}) });
   const pending = addMsg('bot', '…');
-  let reply;
+  let reply, spoken = 0, streamed = false;
+  const wantSpeak = $('#speakReplies').checked;
+  if (wantSpeak) stopSpeaking();
+  const clean = t => t.replace(/^\s*\[\[(EN|NO)\]\]\s*/i, '').replace(/^\s*\[\[?[A-Z]{0,2}$/, '');
+  const onText = full => {
+    streamed = true; const shown = clean(full); pending.textContent = shown || '…'; follow(pending);
+    if (wantSpeak) { const end = Math.max(shown.lastIndexOf('. '), shown.lastIndexOf('? '), shown.lastIndexOf('! '), shown.lastIndexOf('\n')); if (end + 1 > spoken) { speakAppend(shown.slice(spoken, end + 1)); spoken = end + 1; } }
+  };
   try {
     if (hasKey()) {
       const hist = cur.chat.slice(-20).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
       reply = await gemini(null, {
-        history: hist, temp: 0.5, fast: true,
+        history: hist, temp: 0.5, fast: true, onText,
         system: groundRules() + `\nDette er en samtale (ofte muntlig). Svar kort og naturlig (2–5 setninger), som en god lærer. Still gjerne et lite oppfølgingsspørsmål for å sjekke forståelsen. Ikke bruk markdown, lister eller emojier – teksten leses høyt.\nHvis eleven ber deg bytte til engelsk, start svaret med [[EN]] og svar på engelsk. Ber eleven om norsk, start med [[NO]] og svar på norsk.`,
       });
       const m = reply.match(/^\s*\[\[(EN|NO)\]\]\s*/i);
@@ -722,8 +753,10 @@ async function sendChat(text, { hidden = false } = {}) {
   } catch (e) { reply = 'Feil: ' + e.message; }
   pending.textContent = reply; cur.chat.push({ role: 'model', text: reply }); saveTopics();
   chatBusy = false;
-  if ($('#speakReplies').checked && !reply.startsWith('Feil: ')) {
-    const done = await speak(reply);
+  if (wantSpeak && !reply.startsWith('Feil: ')) {
+    let done;
+    if (streamed) { speakAppend(reply.slice(spoken)); done = await waitSpeechIdle(); }
+    else done = await speak(reply);
     if (done && $('#conversationMode').checked && !$('[data-pane=chat]').hidden) micChat();
   }
 }
@@ -1377,31 +1410,39 @@ async function makeLecture() {
   const out = $('#lectureOut'), len = segVal('lectureLen');
   const wordsN = { kort: 300, middels: 700, lang: 1400 }[len];
   stopPlayer(); out.innerHTML = '<p><span class="spin"></span>Skriver foredraget …</p>';
+  const head = '<div class="row"><button class="btn" id="lPlay">' + ic('play_arrow') + ' Les opp</button></div>';
+  let raf = 0, latest = '', reading = false;
+  const render = t => { out.innerHTML = head + md(t); $('#lPlay').onclick = () => { player.live = false; startReading(out); }; markSpeaking(); };
+  const onText = full => {
+    latest = full; if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(latest); });
+    if (!reading && $$('p', out).length >= 2) { reading = true; player.live = true; startReading(out); }
+  };
   try {
     let t;
     if (hasKey()) t = await gemini(`Hold et engasjerende foredrag for en elev om studiestoffet, ca. ${wordsN} ord. Det skal leses høyt.
 Struktur: en kort innledning som sier hva foredraget handler om, deretter 3–6 deler med overskrift (# Overskrift) og korte avsnitt, og til slutt en oppsummering av de viktigste punktene å huske.
-Forklar sammenhenger og gjenta nøkkelbegreper så de fester seg. Bruk bare fakta fra stoffet. Ingen lister, bare avsnitt.`, { system: groundRules(), temp: 0.6 });
+Forklar sammenhenger og gjenta nøkkelbegreper så de fester seg. Bruk bare fakta fra stoffet. Ingen lister, bare avsnitt.`, { system: groundRules(), temp: 0.6, onText });
     else t = '# Viktige punkter fra stoffet\n' + keySentences(docText(), Math.round(wordsN / 22)).join('\n\n');
     cur.cache.lecture = t; saveTopics();
-    out.innerHTML = '<div class="row"><button class="btn" id="lPlay">' + ic('play_arrow') + ' Les opp</button></div>' + md(t);
-    $('#lPlay').onclick = () => startReading(out);
-    startReading(out);
-  } catch (e) { out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
+    cancelAnimationFrame(raf); raf = 0; render(t); player.live = false;
+    if (!reading) startReading(out);
+  } catch (e) { player.live = false; out.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p>`; }
 }
 async function makeSummary() {
   const out = $('#summaryOut'), len = segVal('summaryLen');
   stopPlayer(); out.innerHTML = '<p><span class="spin"></span>Lager sammendrag …</p>';
+  let raf = 0, latest = '';
+  const onText = full => { latest = full; if (!raf) raf = requestAnimationFrame(() => { raf = 0; out.innerHTML = md(latest); }); };
   try {
     let t;
     if (hasKey()) {
       const how = { stikkord: 'Lag et sammendrag som stikkord: korte punkter (- ) gruppert under overskrifter (# ). Ta med alle viktige navn, årstall, begreper og tall.', kort: 'Lag et kort sammendrag på 1–3 avsnitt (maks ca. 200 ord) med det aller viktigste.', grundig: 'Lag et grundig sammendrag med overskrifter (# ) for hver del av stoffet, og avslutt med «# Viktige begreper» som en punktliste med forklaringer.' }[len];
-      t = await gemini(how + ' Bruk bare fakta fra stoffet, i samme rekkefølge som i stoffet.', { system: groundRules(), temp: 0.3 });
+      t = await gemini(how + ' Bruk bare fakta fra stoffet, i samme rekkefølge som i stoffet.', { system: groundRules(), temp: 0.3, onText });
     } else {
       const n = { stikkord: 8, kort: 5, grundig: 14 }[len];
       t = keySentences(docText(), n).map(s => (len === 'stikkord' ? '- ' : '') + s).join('\n\n');
     }
-    cur.cache.summary = t; saveTopics();
+    cur.cache.summary = t; saveTopics(); cancelAnimationFrame(raf); raf = 0;
     out.innerHTML = '<div class="row"><button class="btn" id="sPlay">' + ic('volume_up') + ' Les opp</button><button class="btn ghost" id="sCopy">' + ic('content_copy') + ' Kopier</button></div>' + md(t);
     $('#sPlay').onclick = () => startReading(out);
     $('#sCopy').onclick = () => navigator.clipboard?.writeText(t).then(() => toast('Kopiert'));
