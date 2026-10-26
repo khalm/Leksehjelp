@@ -37,6 +37,15 @@ export default {
       const up = 'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' + encodeURIComponent(env.GEMINI_API_KEY);
       return fetch(up, req);
     }
+    // Strømmet svar (tekst kommer bit for bit – brukes for raskere quiz)
+    const sm = url.pathname.match(/^\/stream\/([\w.\-]+)$/);
+    if (sm && ok && req.method === 'POST') {
+      if (!env.GEMINI_API_KEY) return Response.json({ error: { message: 'Nøkkelen mangler i workeren' } }, { status: 500, headers: cors });
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${sm[1]}:streamGenerateContent?alt=sse`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body: req.body,
+      });
+      return new Response(r.body, { status: r.status, headers: { ...cors, 'Content-Type': r.ok ? 'text/event-stream' : 'application/json', 'Cache-Control': 'no-cache' } });
+    }
     const m = url.pathname.match(/^\/gemini\/([\w.\-]+)$/);
     if (!ok || req.method !== 'POST' || !m) return Response.json({ error: { message: 'Ikke tillatt' } }, { status: 403, headers: cors });
     if (!env.GEMINI_API_KEY) return Response.json({ error: { message: 'Nøkkelen mangler i workeren' } }, { status: 500, headers: cors });

@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -107,28 +107,64 @@ async function pickLiveModels() {
   } catch { return fallback; }
 }
 
-async function gemini(parts, { system = '', json = false, temp = 0.4, history = null } = {}) {
+/* Kortere «tenking» gir mye raskere svar på enkle oppgaver */
+function thinkCfg(m) {
+  if (/gemini-2\.5/.test(m)) return /pro/.test(m) ? null : { thinkingBudget: 0 };
+  if (/gemini-([3-9]|\d{2})/.test(m)) return { thinkingLevel: 'low' };
+  return null;
+}
+async function readSSE(r, onText) {
+  const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', full = '', blocked = '';
+  for (;;) {
+    const { value, done } = await rd.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line.startsWith('data:')) continue;
+      let d; try { d = JSON.parse(line.slice(5)); } catch { continue; }
+      if (d.error) throw new Error(d.error.message || 'Feil fra AI');
+      if (d.promptFeedback?.blockReason) blocked = 'Svaret ble blokkert av Google sitt filter.';
+      const t = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+      if (t) { full += t; onText(full, t); }
+    }
+  }
+  if (!full.trim()) throw new Error(blocked || 'Tomt svar fra AI.');
+  return full;
+}
+async function gemini(parts, opts = {}) {
+  const { system = '', json = false, temp = 0.4, history = null, fast = false, onText = null } = opts;
   if (!hasKey()) throw new Error('NOKEY');
   const contents = history ? history : [{ role: 'user', parts: Array.isArray(parts) ? parts : [{ text: parts }] }];
   const body = { contents, generationConfig: { temperature: temp } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (json) body.generationConfig.responseMimeType = 'application/json';
   const models = settings.model ? [settings.model] : await pickModels();
+  const stream = !!onText;
   let lastErr;
   for (const m of models) {
+    let useThink = fast;
     for (let attempt = 0; attempt < 3; attempt++) {
       const direct = !!settings.apiKey;
-      const r = await fetch(direct ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent` : `${PROXY}/gemini/${encodeURIComponent(m)}`, {
-        method: 'POST', headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      const gc = { ...body.generationConfig };
+      if (useThink) { const t = thinkCfg(m); if (t) gc.thinkingConfig = t; }
+      const url = direct
+        ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`
+        : `${PROXY}/${stream ? 'stream' : 'gemini'}/${encodeURIComponent(m)}`;
+      const r = await fetch(url, {
+        method: 'POST', headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, generationConfig: gc }),
       }).catch(e => ({ ok: false, status: 0, _e: e }));
       if (r.ok) {
+        if (stream) { const full = await readSSE(r, onText); return json ? parseJSON(full) : full.trim(); }
         const d = await r.json();
-        const txt = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+        const txt = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
         if (!txt) throw new Error(d.promptFeedback?.blockReason ? 'Svaret ble blokkert av Google sitt filter.' : 'Tomt svar fra AI.');
         if (!json) return txt;
         return parseJSON(txt);
       }
       let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
+      // Eldre proxy uten strømming → vanlig kall
+      if (stream && !direct && r.status === 403 && /Ikke tillatt/.test(msg)) { const t = await gemini(parts, { ...opts, onText: null }); onText(typeof t === 'string' ? t : JSON.stringify(t), ''); return t; }
+      if (r.status === 400 && useThink && /think/i.test(msg)) { useThink = false; attempt--; continue; }
       if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); modelCache = null; settings.autoModels = null; saveSettings(); break; }
       if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under Innstillinger.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
       if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
@@ -560,6 +596,7 @@ function switchTab(name) {
   $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(p => p.hidden = p.dataset.pane !== name);
   if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først'); }
+  if (name === 'quiz' && cur?.sources.length) prefetchQuiz();
   if (name === 'quiz') $('#quizHint').textContent = hasKey() ? '' : 'Uten AI-nøkkel lages enkle «fyll inn ordet»-spørsmål.';
 }
 function renderTopics() {
@@ -649,7 +686,7 @@ async function sendChat(text) {
     if (hasKey()) {
       const hist = cur.chat.slice(-20).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
       reply = await gemini(null, {
-        history: hist, temp: 0.5,
+        history: hist, temp: 0.5, fast: true,
         system: groundRules() + `\nDette er en samtale (ofte muntlig). Svar kort og naturlig (2–5 setninger), som en god lærer. Still gjerne et lite oppfølgingsspørsmål for å sjekke forståelsen. Ikke bruk markdown, lister eller emojier – teksten leses høyt.\nHvis eleven ber deg bytte til engelsk, start svaret med [[EN]] og svar på engelsk. Ber eleven om norsk, start med [[NO]] og svar på norsk.`,
       });
       const m = reply.match(/^\s*\[\[(EN|NO)\]\]\s*/i);
@@ -828,36 +865,80 @@ function stopLive() {
 }
 
 /* ---------- quiz ---------- */
-let quiz = null;
+let quiz = null, quizGen = null;
 function resetQuiz() { quiz = null; $('#quizSetup').hidden = false; $('#quizRun').hidden = true; $('#quizRun').innerHTML = ''; }
-async function startQuiz(focus = null) {
-  const mode = segVal('quizMode'), type = segVal('quizType'), count = +segVal('quizCount'), qlevel = segVal('quizLevel');
+const quizKey = () => [cur?.id, cur?.updated, level(), settings.lang, segVal('quizMode'), segVal('quizType'), segVal('quizLevel')].join('|');
+function normQ(q) {
+  if (!q || !q.question) return null;
+  if (q.type === 'mc' && (!Array.isArray(q.options) || q.options.length < 2)) q.type = 'open';
+  if (q.type === 'mc') { q.correct = Math.max(0, Math.min(q.options.length - 1, +q.correct || 0)); q.answer ||= q.options[q.correct]; }
+  else q.type = 'open';
+  return q;
+}
+/* Lager spørsmålene som en strøm: hvert spørsmål kan brukes så snart det er ferdig skrevet */
+function makeQuizGen(focus = null, count = +segVal('quizCount')) {
+  const gen = { key: quizKey(), count, qs: [], done: false, error: null, subs: new Set() };
+  const notify = () => gen.subs.forEach(f => { try { f(); } catch { } });
+  if (!hasKey()) { gen.qs.push(...clozeQuiz(docText(), count)); gen.done = true; return gen; }
+  const mode = segVal('quizMode'), type = segVal('quizType'), qlevel = segVal('quizLevel');
   const nOpt = level() <= 1 ? 3 : 4;
-  $('#quizSetup').hidden = true; const run = $('#quizRun'); run.hidden = false;
-  run.innerHTML = '<p><span class="spin"></span>Lager quiz …</p>';
-  let qs;
-  try {
-    if (hasKey()) {
-      const typeTxt = type === 'mc' ? `Bare flervalg (${nOpt} alternativer).` : type === 'open' ? 'Bare åpne spørsmål (kort svar).' : `Bland flervalg (${nOpt} alternativer) og åpne spørsmål omtrent likt.`;
-      const res = await gemini(`Lag en quiz med ${count} spørsmål om studiestoffet. Vanskelighetsgrad: ${qlevel}. ${typeTxt}
+  const typeTxt = type === 'mc' ? `Bare flervalg (${nOpt} alternativer).` : type === 'open' ? 'Bare åpne spørsmål (kort svar).' : `Bland flervalg (${nOpt} alternativer) og åpne spørsmål omtrent likt.`;
+  const prompt = `Lag en quiz med ${count} spørsmål om studiestoffet. Vanskelighetsgrad: ${qlevel}. ${typeTxt}
 Språket i spørsmål, alternativer, hint og forklaringer skal følge FORKLARINGSSTILEN (${LEVELS[level()].name}).${level() <= 2 ? ' Spørsmålene skal være korte og konkrete, med bare én ting i hvert spørsmål. Åpne spørsmål skal kunne besvares med ett eller noen få ord.' : ''}${level() >= 5 ? ' Spørsmålene kan kreve forståelse, sammenligning og resonnering, ikke bare gjengivelse – men svaret må fortsatt følge av stoffet.' : ''}
 ${mode === 'oral' ? 'Quizen tas MUNTLIG: spørsmålene skal være lette å forstå når de leses høyt, korte alternativer.' : ''}
-${focus ? 'Eleven bommet på disse – lag NYE spørsmål som øver på akkurat de samme faktaene fra en annen vinkel:\n' + focus.map(q => '- ' + q.question + ' (riktig: ' + q.answer + ')').join('\n') : 'Dekk de viktigste faktaene i hele stoffet, ikke bare starten.'}
-Alle svar SKAL kunne finnes i stoffet. Feil alternativer skal være troverdige men tydelig feil ifølge stoffet.
-Svar som JSON: {"questions":[{"type":"mc"|"open","question":"…","options":["…","…","…","…"],"correct":0,"answer":"riktig svar formulert kort","explanation":"kort forklaring","hint":"et lite hint som hjelper uten å røpe svaret","quote":"kort sitat fra stoffet som viser svaret"}]}  (options og correct bare for mc).`, { system: groundRules(), json: true, temp: 0.7 });
-      qs = (res.questions || res).filter(q => q.question);
-      qs.forEach(q => { if (q.type === 'mc' && (!Array.isArray(q.options) || q.options.length < 2)) q.type = 'open'; if (q.type === 'mc') { q.correct = Math.max(0, Math.min(q.options.length - 1, +q.correct || 0)); q.answer ||= q.options[q.correct]; } });
-    } else qs = clozeQuiz(docText(), count);
-    if (!qs.length) throw new Error('Fikk ikke laget spørsmål – er det nok tekst i stoffet?');
-  } catch (e) { run.innerHTML = `<p class="fb bad">${ic('error')}${esc(e.message)}</p><button class="btn wide" onclick="resetQuiz()">Tilbake</button>`; return; }
-  quiz = { qs, i: 0, mode, results: [] };
-  showQuestion();
+${focus ? 'Eleven bommet på disse – lag NYE spørsmål som øver på akkurat de samme faktaene fra en annen vinkel:\n' + focus.map(q => '- ' + q.question + ' (riktig: ' + q.answer + ')').join('\n') : 'Dekk de viktigste faktaene i hele stoffet, ikke bare starten. Varier rekkefølgen.'}
+Alle svar SKAL kunne finnes i stoffet. Feil alternativer skal være troverdige men tydelig feil ifølge stoffet. Hold forklaring og sitat korte.
+FORMAT: Skriv hvert spørsmål som ett JSON-objekt på ÉN linje (JSON Lines) – ingen tekst før eller etter, ingen kodeblokk, ingen liste rundt:
+{"type":"mc","question":"…","options":["…","…","…"],"correct":0,"answer":"kort riktig svar","explanation":"kort forklaring","hint":"lite hint uten å røpe svaret","quote":"kort sitat fra stoffet"}
+{"type":"open","question":"…","answer":"kort riktig svar","explanation":"…","hint":"…","quote":"…"}`;
+  let seen = 0;
+  const take = line => { line = line.trim().replace(/^```\w*|```$/g, '').replace(/,$/, '').trim(); if (!line.startsWith('{')) return; try { const q = normQ(JSON.parse(line)); if (q && gen.qs.length < count) { gen.qs.push(q); notify(); } } catch { } };
+  gen.promise = gemini(prompt, {
+    system: groundRules(), temp: 0.7, fast: true,
+    onText: full => { const lines = full.split('\n'); for (; seen < lines.length - 1; seen++) take(lines[seen]); },
+  }).then(full => {
+    const lines = full.split('\n'); for (; seen < lines.length; seen++) take(lines[seen]);
+    if (!gen.qs.length) { try { const j = parseJSON(full); (j.questions || j).forEach(q => { q = normQ(q); if (q && gen.qs.length < count) gen.qs.push(q); }); } catch { } }
+    if (!gen.qs.length) gen.error = new Error('Fikk ikke laget spørsmål – prøv igjen.');
+  }).catch(e => { gen.error = e; }).finally(() => { gen.done = true; notify(); });
+  return gen;
+}
+/* Begynn å lage quizen med en gang Quiz-fanen åpnes, så den er klar når eleven trykker Start */
+function prefetchQuiz() {
+  if (!cur?.sources.length || quiz || !hasKey()) return;
+  if (quizGen && quizGen.key === quizKey() && !quizGen.error) return;
+  quizGen = makeQuizGen(null, 20);
+}
+const quizTotal = () => quiz.gen.done ? Math.min(quiz.count, quiz.gen.qs.length) : quiz.count;
+async function startQuiz(focus = null) {
+  const mode = segVal('quizMode'), count = +segVal('quizCount');
+  $('#quizSetup').hidden = true; const run = $('#quizRun'); run.hidden = false;
+  let gen = !focus && quizGen && quizGen.key === quizKey() && !quizGen.error && quizGen.count >= count ? quizGen : makeQuizGen(focus, count);
+  quizGen = null;
+  quiz = { gen, qs: gen.qs, i: 0, mode, count, results: [], waiting: false };
+  const me = quiz;
+  gen.subs.add(() => {
+    if (quiz !== me) return;
+    if (me.waiting && (gen.qs.length > me.i || gen.done)) { me.waiting = false; advanceTo(); }
+    else if (!me.waiting) { const n = $('#qTotal'); if (n) n.textContent = quizTotal(); }
+  });
+  me.waiting = true;
+  if (gen.qs.length || gen.done) { me.waiting = false; advanceTo(); }
+  else run.innerHTML = '<p><span class="spin"></span>Lager første spørsmål …</p>';
+}
+function advanceTo() {
+  const run = $('#quizRun');
+  if (quiz.i < quiz.gen.qs.length && quiz.i < quiz.count) return showQuestion();
+  if (!quiz.gen.done) { quiz.waiting = true; run.innerHTML = '<p><span class="spin"></span>Lager neste spørsmål …</p>'; return; }
+  if (!quiz.results.length && quiz.gen.error) { run.innerHTML = `<p class="fb bad">${ic('error')}${esc(quiz.gen.error.message)}</p><button class="btn wide" onclick="resetQuiz()">Tilbake</button>`; quiz = null; return; }
+  if (!quiz.results.length && !quiz.gen.qs.length) { run.innerHTML = `<p class="fb bad">${ic('error')}Fikk ikke laget spørsmål – er det nok tekst i stoffet?</p><button class="btn wide" onclick="resetQuiz()">Tilbake</button>`; quiz = null; return; }
+  finishQuiz();
 }
 const LETTERS = 'ABCDEFG';
 function showQuestion() {
   const q = quiz.qs[quiz.i], run = $('#quizRun');
-  run.innerHTML = `<div class="progress"><i style="width:${(quiz.i / quiz.qs.length) * 100}%"></i></div>
-  <div class="qcard"><div class="num">Spørsmål ${quiz.i + 1} av ${quiz.qs.length}</div><div class="q">${esc(q.question)}</div>
+  run.innerHTML = `<div class="progress"><i style="width:${(quiz.i / quizTotal()) * 100}%"></i></div>
+  <div class="qcard"><div class="num">Spørsmål ${quiz.i + 1} av <span id="qTotal">${quizTotal()}</span></div><div class="q">${esc(q.question)}</div>
   <div class="row qtools"><button class="btn ghost small" id="qSay">${ic('volume_up')} Les opp</button>${q.hint ? `<button class="btn ghost small" id="qHint">${ic('lightbulb')} Hint</button>` : ''}</div><div id="qHintOut"></div>
   ${q.type === 'mc' ? `<div class="opts">${q.options.map((o, k) => `<button data-k="${k}"><span class="key">${LETTERS[k]}</span><span>${esc(o)}</span></button>`).join('')}</div>`
       : `<textarea id="openAns" rows="3" placeholder="Skriv svaret ditt"></textarea>`}
@@ -891,7 +972,7 @@ async function oralAnswer() {
       let k = q.options.findIndex(o => s.includes(o.toLowerCase().trim()));
       if (k < 0) { const m = s.match(/(?:^|\b(?:svar|alternativ|answer|option)\s*)([a-d])\b/i) || s.match(/^\s*([a-d])\b/i); if (m) k = LETTERS.indexOf(m[1].toUpperCase()); }
       if (k < 0 && hasKey()) {
-        try { const r = await gemini(`Eleven svarte muntlig: "${t}". Alternativene: ${q.options.map((o, i) => i + ': ' + o).join(' | ')}. Hvilket alternativ mente eleven? Svar JSON {"index": tall eller -1}`, { json: true, temp: 0 }); k = +r.index; } catch { }
+        try { const r = await gemini(`Eleven svarte muntlig: "${t}". Alternativene: ${q.options.map((o, i) => i + ': ' + o).join(' | ')}. Hvilket alternativ mente eleven? Svar JSON {"index": tall eller -1}`, { json: true, temp: 0, fast: true }); k = +r.index; } catch { }
       }
       if (k >= 0 && k < q.options.length) answerMC(k); else { toast('Fikk ikke med meg svaret – prøv igjen'); speak(settings.lang === 'en' ? 'Sorry, I did not catch that. Try again.' : 'Det fikk jeg ikke med meg. Prøv igjen.'); }
     } else answerOpen(t);
@@ -912,7 +993,7 @@ async function answerOpen(given) {
   let verdict = 'bad', comment = '';
   try {
     if (hasKey()) {
-      const r = await gemini(`Spørsmål: ${q.question}\nRiktig svar ifølge stoffet: ${q.answer}\nElevens svar: ${given}\nVurder om eleven har forstått det riktige. Vær raus med stavefeil, synonymer og andre ord for det samme (og ord som er feilhørt av talegjenkjenning). JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, oppmuntrende setning til eleven"}`, { system: groundRules(), json: true, temp: 0 });
+      const r = await gemini(`Spørsmål: ${q.question}\nRiktig svar ifølge stoffet: ${q.answer}\nElevens svar: ${given}\nVurder om eleven har forstått det riktige. Vær raus med stavefeil, synonymer og andre ord for det samme (og ord som er feilhørt av talegjenkjenning). JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, oppmuntrende setning til eleven"}`, { system: groundRules(), json: true, temp: 0, fast: true });
       verdict = r.verdict === 'riktig' ? 'ok' : r.verdict === 'delvis' ? 'part' : 'bad'; comment = r.comment || '';
     } else {
       const aw = words(q.answer).filter(w => !STOP.has(w)), gw = words(given);
@@ -926,11 +1007,11 @@ async function answerOpen(given) {
 }
 function feedback(cls, text, q) {
   $('#qFb').innerHTML = `<div class="fb ${cls}">${esc(text)}${q.explanation ? '<br>' + esc(q.explanation) : ''}${q.quote ? `<span class="quote">«${esc(q.quote)}»</span>` : ''}</div>
-    <button class="btn primary wide" id="qNext">${quiz.i + 1 < quiz.qs.length ? 'Neste spørsmål' : 'Se resultat'}</button>`;
+    <button class="btn primary wide" id="qNext">${quiz.i + 1 < quizTotal() ? 'Neste spørsmål' : 'Se resultat'}</button>`;
   $('#qNext').onclick = () => { stopSpeaking(); nextQ(); };
   if (quiz.mode === 'oral') { const my = quiz.i; speak(text).then(done => { if (done && quiz && quiz.i === my) nextQ(); }); }
 }
-function nextQ() { stopListening(); quiz.i++; if (quiz.i >= quiz.qs.length) finishQuiz(); else showQuestion(); }
+function nextQ() { stopListening(); quiz.i++; advanceTo(); }
 function finishQuiz() {
   stopSpeaking(); stopListening(); if (!quiz) return resetQuiz();
   const n = quiz.results.length, pts = quiz.results.reduce((a, r) => a + (r.ok ? 1 : r.partial ? .5 : 0), 0);
@@ -996,7 +1077,7 @@ async function runCheck() {
   if (!hasKey()) { out.innerHTML = '<p class="notice">Faktasjekken trenger en gratis Gemini-nøkkel. <button class="linkbtn" data-open-settings>Legg inn nøkkel</button></p>'; return; }
   out.innerHTML = '<p><span class="spin"></span>Finner påstander i stoffet …</p>';
   try {
-    const c = await gemini('Plukk ut inntil 15 konkrete, sjekkbare faktapåstander fra studiestoffet (årstall, navn, tall, hendelser, definisjoner). For hver: lag et kort Wikipedia-søkeord (helst artikkelnavnet). JSON: {"claims":[{"claim":"påstanden med egne ord","quote":"kort sitat fra stoffet","search":"søkeord"}]}', { system: groundRules(), json: true, temp: 0 });
+    const c = await gemini('Plukk ut inntil 15 konkrete, sjekkbare faktapåstander fra studiestoffet (årstall, navn, tall, hendelser, definisjoner). For hver: lag et kort Wikipedia-søkeord (helst artikkelnavnet). JSON: {"claims":[{"claim":"påstanden med egne ord","quote":"kort sitat fra stoffet","search":"søkeord"}]}', { system: groundRules(), json: true, temp: 0, fast: true });
     const claims = (c.claims || []).slice(0, 15);
     const terms = [...new Set(claims.map(x => x.search).filter(Boolean))].slice(0, 6);
     const pages = [];
@@ -1089,6 +1170,7 @@ $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: []
 $('#topicName').oninput = e => { cur.name = e.target.value.trim(); $('#title').textContent = cur.name || 'Nytt tema'; cur.updated = Date.now(); saveTopics(); };
 $$('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 $$('.seg').forEach(s => s.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('button', s).forEach(x => x.classList.toggle('on', x === b)); }));
+let prefT; $('#quizSetup').addEventListener('click', e => { if (e.target.closest('.seg')) { clearTimeout(prefT); prefT = setTimeout(prefetchQuiz, 700); } });
 $('#addCamera').onclick = () => $('#cameraInput').click();
 $('#addFile').onclick = () => $('#fileInput').click();
 $('#cameraInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
