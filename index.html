@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.2.1">
+<link rel="stylesheet" href="style.css?v=1.3.0">
 </head>
 <body>
 <header class="topbar">
@@ -73,14 +73,22 @@
 
   <!-- Snakk -->
   <div class="tab" data-pane="chat" hidden>
+    <div class="livebox">
+      <button id="liveBtn" class="liveorb" aria-label="Start live-samtale"><span>🎙</span></button>
+      <div id="liveStatus" class="livestatus">Trykk for å starte live-samtale</div>
+      <button id="liveStop" class="btn ghost" hidden>■ Avslutt samtalen</button>
+      <label class="toggle"><input type="checkbox" id="liveHalfDuplex"> Ikke avbryt (demp mikrofonen mens appen snakker – nyttig uten hodetelefoner)</label>
+    </div>
     <div id="chatLog" class="chatlog"></div>
     <div class="chatbar">
       <button id="micBtn" class="iconbtn big" aria-label="Snakk">🎤</button>
       <input id="chatInput" type="text" placeholder="Spør om temaet …">
       <button id="sendBtn" class="iconbtn big" aria-label="Send">➤</button>
     </div>
+    <details class="small muted"><summary>Valg for skrevet samtale</summary>
     <label class="toggle"><input type="checkbox" id="speakReplies" checked> Les svarene høyt</label>
-    <label class="toggle"><input type="checkbox" id="conversationMode"> Samtalemodus (lytter igjen etter hvert svar)</label>
+    <label class="toggle"><input type="checkbox" id="conversationMode"> Lytt igjen etter hvert svar (🎤-knappen)</label>
+    </details>
   </div>
 
   <!-- Quiz -->
@@ -165,6 +173,9 @@
     <label class="field">Modell
       <input id="modelName" type="text" placeholder="Automatisk">
     </label>
+    <label class="field">Stemme i live-samtale
+      <select id="liveVoiceSel"></select>
+    </label>
     <label class="field">Stemme for opplesning
       <select id="voiceSel"></select>
     </label>
@@ -189,7 +200,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.2.1"></script>
-<script src="app.js?v=1.2.1"></script>
+<script src="config.js?v=1.3.0"></script>
+<script src="app.js?v=1.3.0"></script>
 </body>
 </html>

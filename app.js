@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -72,20 +72,36 @@ function rankModels(list) {
   const score = n => ver(n) * 100 - (/lite/.test(n) ? 30 : 0) - (/(preview|exp)/.test(n) ? 5 : 0) - (/-\d{3,}$/.test(n) ? 1 : 0) + (/latest/.test(n) ? 50 : 0);
   return usable.sort((a, b) => score(b) - score(a));
 }
+let rawModels = null;
+async function fetchModelList() {
+  if (rawModels) return rawModels;
+  const r = settings.apiKey
+    ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': settings.apiKey } })
+    : await fetch(PROXY + '/models');
+  if (!r.ok) throw new Error('Fikk ikke modell-listen (' + r.status + ')');
+  return (rawModels = (await r.json()).models || []);
+}
 async function pickModels() {
   if (modelCache) return modelCache;
   const c = settings.autoModels;
   if (c && Date.now() - c.t < 864e5 && c.list?.length) return (modelCache = c.list);
   try {
-    const r = settings.apiKey
-      ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': settings.apiKey } })
-      : await fetch(PROXY + '/models');
-    if (r.ok) {
-      const list = rankModels((await r.json()).models || []).slice(0, 4);
-      if (list.length) { modelCache = list; settings.autoModels = { t: Date.now(), list }; saveSettings(); return list; }
-    }
+    const list = rankModels(await fetchModelList()).slice(0, 4);
+    if (list.length) { modelCache = list; settings.autoModels = { t: Date.now(), list }; saveSettings(); return list; }
   } catch { }
   return [DEFAULT_MODEL, 'gemini-3-flash', 'gemini-3-flash-preview'];
+}
+/* Live-modeller (sanntids tale), nyeste først. Unngår «thinking»-varianten fordi den svarer tregere. */
+async function pickLiveModels() {
+  const fallback = ['gemini-3.8-live', 'gemini-3.1-flash-live-preview'];
+  try {
+    const ver = n => { const v = n.match(/gemini-(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
+    const names = (await fetchModelList()).filter(m => (m.supportedGenerationMethods || []).includes('bidiGenerateContent'))
+      .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini/.test(n) && !/(thinking|image|embed)/i.test(n));
+    const score = n => ver(n) * 100 + (/live/.test(n) ? 20 : 0) + (/native-audio/.test(n) ? 15 : 0) - (/(preview|exp)/.test(n) ? 5 : 0) - (/-\d{2}-\d{4}$|-\d{3,}$/.test(n) ? 1 : 0);
+    const list = names.sort((a, b) => score(b) - score(a));
+    return list.length ? [...list.slice(0, 3), ...fallback.filter(f => !list.includes(f))] : fallback;
+  } catch { return fallback; }
 }
 
 async function gemini(parts, { system = '', json = false, temp = 0.4, history = null } = {}) {
@@ -376,7 +392,7 @@ function touch() { cur.updated = Date.now(); cur.cache = {}; saveTopics(); }
 
 /* ---------- navigasjon ---------- */
 function showHome() {
-  stopPlayer(); stopListening(); cur = null;
+  stopPlayer(); stopListening(); stopLive(); cur = null;
   $('#home').hidden = false; $('#topic').hidden = true; $('#backBtn').hidden = true; $('#title').textContent = 'Leksehjelp';
   renderTopics();
 }
@@ -391,7 +407,7 @@ function openTopic(t, tab = 'material') {
   switchTab(tab); scrollTo(0, 0);
 }
 function switchTab(name) {
-  stopPlayer(); stopListening();
+  stopPlayer(); stopListening(); if (name !== 'chat') stopLive();
   $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(p => p.hidden = p.dataset.pane !== name);
   if (name !== 'material' && !cur.sources.length) { $$('.tab')[0].hidden = false; $$('.tab').forEach(p => { if (p.dataset.pane !== 'material') p.hidden = true; }); $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'material')); toast('Legg inn stoff først 📄'); }
@@ -432,7 +448,7 @@ function renderSources() {
 function addMsg(role, text) { const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text; $('#chatLog').appendChild(d); d.scrollIntoView({ block: 'end', behavior: 'smooth' }); return d; }
 function renderChat() {
   $('#chatLog').innerHTML = '';
-  if (!cur.chat.length) addMsg('sys', hasKey() ? 'Still et spørsmål om temaet – skriv, eller trykk 🎤 og snakk. Si «snakk engelsk» for å bytte språk.' : 'Uten AI-nøkkel finner appen setningene i stoffet som passer best til spørsmålet ditt.');
+  if (!cur.chat.length) addMsg('sys', hasKey() ? 'Trykk på den store knappen for å snakke fritt med appen – som Gemini Live. Du kan også skrive under. Si «snakk engelsk» for å bytte språk.' : 'Uten AI-nøkkel finner appen setningene i stoffet som passer best til spørsmålet ditt.');
   cur.chat.forEach(m => addMsg(m.role === 'user' ? 'user' : 'bot', m.text));
 }
 function detectLangSwitch(t) {
@@ -443,7 +459,14 @@ function detectLangSwitch(t) {
 }
 let chatBusy = false;
 async function sendChat(text) {
-  text = text.trim(); if (!text || chatBusy) return;
+  text = text.trim(); if (!text) return;
+  if (live.on && live.setupDone && live.ws?.readyState === 1) {
+    $('#chatInput').value = ''; if (live.botB) flushBot(); stopPlayback();
+    addMsg('user', text); cur.chat.push({ role: 'user', text });
+    const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
+    live.ws.send(JSON.stringify({ realtimeInput: { text } })); return;
+  }
+  if (chatBusy) return;
   chatBusy = true; $('#chatInput').value = '';
   const sw = detectLangSwitch(text); if (sw && sw !== settings.lang) setLang(sw, true);
   addMsg('user', text); cur.chat.push({ role: 'user', text });
@@ -478,6 +501,156 @@ async function micChat() {
   try { const t = await listen(); btn.classList.remove('listening'); if (t) sendChat(t); }
   catch (e) { btn.classList.remove('listening'); toast(e.message, 5000); }
   finally { listen.onInterim = null; }
+}
+
+/* ---------- live-samtale (som Gemini Live) ---------- */
+const LIVE_VOICES = ['Kore', 'Aoede', 'Leda', 'Zephyr', 'Puck', 'Charon', 'Fenrir', 'Orus'];
+const live = { ws: null, on: false, setupDone: false, micCtx: null, outCtx: null, stream: null, node: null, sources: new Set(), nextT: 0, speaking: false, userB: null, botB: null, userT: '', botT: '', attempts: [], ai: 0, level: 0 };
+const WORKLET = `class Cap extends AudioWorkletProcessor{constructor(){super();this.r=sampleRate/16000;this.c=0;this.a=0;this.n=0;this.out=[];this.e=0}
+process(inp){const ch=inp[0]&&inp[0][0];if(!ch)return true;
+for(let i=0;i<ch.length;i++){const x=ch[i];this.a+=x;this.n++;this.c++;this.e+=x*x;if(this.c>=this.r){this.out.push(this.a/this.n);this.a=0;this.n=0;this.c-=this.r}}
+if(this.out.length>=1600){const s=new Int16Array(this.out.length);for(let i=0;i<s.length;i++){const v=Math.max(-1,Math.min(1,this.out[i]));s[i]=v<0?v*32768:v*32767}
+const lvl=Math.sqrt(this.e/(this.out.length*this.r));this.out=[];this.e=0;this.port.postMessage({pcm:s.buffer,lvl},[s.buffer])}return true}}
+registerProcessor('cap',Cap);`;
+function b64FromBuf(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+function setLiveState(state, text) {
+  const orb = $('#liveBtn'); orb.className = 'liveorb ' + state;
+  $('#liveStatus').textContent = text;
+  $('#liveStop').hidden = !live.on;
+}
+function liveSystem() {
+  const doc = docText(); const capped = doc.length > 150000 ? doc.slice(0, 150000) + '\n[…forkortet…]' : doc;
+  const recent = cur.chat.slice(-12).map(m => (m.role === 'user' ? 'Eleven: ' : 'Du: ') + m.text).join('\n');
+  return `Du er Leksehjelp, en varm, tålmodig og engasjert studiehjelper i en LIVE muntlig samtale med en elev om temaet «${cur.name || 'temaet'}».
+SPRÅK: Snakk norsk bokmål med naturlig norsk uttale. Hvis eleven ber deg snakke engelsk, bytt til engelsk og fortsett på engelsk til eleven ber om norsk igjen.
+FAKTA: Bruk KUN fakta fra STUDIESTOFFET under. Ikke finn på eller legg til fakta, tall, navn eller årstall. Står noe ikke i stoffet, si det rett ut. Gjengi fakta slik de står i stoffet.
+STIL: Dette er en muntlig samtale – svar kort og naturlig (som regel 1–4 setninger), snakk som en hyggelig lærer, ikke som en tekst. Ingen lister eller opplesning av overskrifter. Still gjerne oppfølgingsspørsmål for å sjekke at eleven har forstått.
+Eleven kan be deg om:
+- å bli forhørt / ta en muntlig quiz: still ETT spørsmål om gangen, vent på svaret, si om det var riktig (med en kort forklaring fra stoffet), hold tellingen og si poengsummen til slutt.
+- et foredrag: hold et levende, sammenhengende foredrag basert på stoffet, i passende lengde.
+- et sammendrag: fortell de viktigste punktene kort.
+- å forklare noe enklere: bruk enkle ord og eksempler, men ikke nye fakta.
+${recent ? 'TIDLIGERE I SAMTALEN:\n' + recent + '\n' : ''}STUDIESTOFF:
+"""
+${capped}
+"""`;
+}
+function stopPlayback() {
+  live.sources.forEach(s => { try { s.stop(); } catch { } }); live.sources.clear(); live.nextT = 0; setSpeaking(false);
+}
+function setSpeaking(on) {
+  live.speaking = on;
+  if (live.on && live.setupDone) setLiveState(on ? 'speak' : 'listen', on ? (settings.lang === 'en' ? 'Speaking … (just talk to interrupt)' : 'Snakker … (bare snakk for å avbryte)') : (settings.lang === 'en' ? 'Listening – just talk' : 'Lytter – bare snakk'));
+}
+function playPcm(b64, mime) {
+  const ctx = live.outCtx; if (!ctx) return;
+  const rate = +((mime || '').match(/rate=(\d+)/) || [0, 24000])[1];
+  const bin = atob(b64); const n = bin.length >> 1; const f = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); if (v >= 32768) v -= 65536; f[i] = v / 32768; }
+  const buf = ctx.createBuffer(1, n, rate); buf.copyToChannel(f, 0);
+  const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+  const t = Math.max(ctx.currentTime + 0.04, live.nextT); src.start(t); live.nextT = t + buf.duration;
+  live.sources.add(src); setSpeaking(true);
+  src.onended = () => { live.sources.delete(src); if (!live.sources.size) setSpeaking(false); };
+}
+function flushUser() {
+  if (live.userT.trim()) {
+    cur.chat.push({ role: 'user', text: live.userT.trim() });
+    const sw = detectLangSwitch(live.userT); if (sw && sw !== settings.lang) setLang(sw, true);
+  }
+  live.userB = null; live.userT = '';
+}
+function flushBot() { if (live.botT.trim()) cur.chat.push({ role: 'model', text: live.botT.trim() }); live.botB = null; live.botT = ''; saveTopics(); }
+function liveUserText(t) {
+  if (live.botB) flushBot();
+  if (!live.userB) live.userB = addMsg('user', '');
+  live.userT += t; live.userB.textContent = live.userT.trim();
+}
+function liveBotText(t) {
+  if (live.userB) flushUser();
+  if (!live.botB) live.botB = addMsg('bot', '');
+  live.botT += t; live.botB.textContent = live.botT.trim(); live.botB.scrollIntoView({ block: 'end' });
+}
+async function startLive() {
+  if (live.on) return stopLive();
+  if (!hasKey()) { toast('Live-samtale trenger AI – legg inn nøkkel under ⚙', 4000); return; }
+  stopSpeaking(); stopPlayer(); stopListening();
+  live.on = true; live.setupDone = false; setLiveState('connect', 'Kobler til …');
+  try {
+    // Lydkontekster må lages i selve trykket (krav på iPhone)
+    live.outCtx = new (window.AudioContext || window.webkitAudioContext)(); await live.outCtx.resume();
+    live.micCtx = new (window.AudioContext || window.webkitAudioContext)(); await live.micCtx.resume();
+    live.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    await live.micCtx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+    const src = live.micCtx.createMediaStreamSource(live.stream);
+    live.node = new AudioWorkletNode(live.micCtx, 'cap');
+    const mute = live.micCtx.createGain(); mute.gain.value = 0;
+    src.connect(live.node); live.node.connect(mute); mute.connect(live.micCtx.destination);
+    live.node.port.onmessage = e => {
+      const { pcm, lvl } = e.data;
+      if (live.setupDone && !live.speaking) $('#liveBtn').style.setProperty('--lvl', Math.min(1, lvl * 6).toFixed(2));
+      if (!live.on || !live.setupDone || live.ws?.readyState !== 1) return;
+      if (live.speaking && $('#liveHalfDuplex').checked) return;
+      live.ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64FromBuf(pcm), mimeType: 'audio/pcm;rate=16000' } } }));
+    };
+    const models = await pickLiveModels();
+    live.attempts = models.flatMap(m => [{ m, voice: true }, { m, voice: false }]); live.ai = 0;
+    openLiveSocket();
+  } catch (e) {
+    stopLive();
+    toast(/Permission|NotAllowed/i.test(e.name + e.message) ? 'Mikrofonen er blokkert. Gi nettleseren tilgang til mikrofonen.' : 'Klarte ikke å starte: ' + e.message, 5000);
+  }
+}
+function openLiveSocket() {
+  const a = live.attempts[live.ai]; if (!a) { stopLive(); toast('Fant ingen live-modell som virker akkurat nå.', 5000); return; }
+  const url = settings.apiKey
+    ? 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' + encodeURIComponent(settings.apiKey)
+    : PROXY.replace(/^http/, 'ws') + '/live';
+  const ws = live.ws = new WebSocket(url); ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    const gen = { responseModalities: ['AUDIO'] };
+    if (a.voice) gen.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.liveVoice || 'Kore' } } };
+    ws.send(JSON.stringify({ setup: { model: 'models/' + a.m, generationConfig: gen, systemInstruction: { parts: [{ text: liveSystem() }] }, inputAudioTranscription: {}, outputAudioTranscription: {} } }));
+  };
+  ws.onmessage = e => {
+    let msg; try { msg = JSON.parse(typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)); } catch { return; }
+    if (msg.setupComplete) {
+      live.setupDone = true; setSpeaking(false);
+      addMsg('sys', (settings.lang === 'en' ? 'Live conversation started' : 'Live-samtale startet') + ' (' + a.m + ')');
+      const hello = settings.lang === 'en' ? '(The student just started a live conversation. Greet them very briefly in English and ask what they want to go through.)' : '(Eleven har akkurat startet en live-samtale. Hils veldig kort og spør hva eleven vil gå gjennom – for eksempel forklaring, forhør, foredrag eller sammendrag.)';
+      ws.send(JSON.stringify({ realtimeInput: { text: hello } }));
+      return;
+    }
+    const sc = msg.serverContent;
+    if (sc) {
+      if (sc.interrupted) { stopPlayback(); if (live.botB) flushBot(); }
+      if (sc.inputTranscription?.text) liveUserText(sc.inputTranscription.text);
+      if (sc.outputTranscription?.text) liveBotText(sc.outputTranscription.text);
+      for (const p of sc.modelTurn?.parts || []) if (p.inlineData?.data && /audio/.test(p.inlineData.mimeType || 'audio')) playPcm(p.inlineData.data, p.inlineData.mimeType);
+      if (sc.turnComplete) { if (live.userB) flushUser(); flushBot(); }
+    }
+    if (msg.goAway) toast(settings.lang === 'en' ? 'The session will end soon – just start again.' : 'Samtalen når snart tidsgrensen – bare start igjen etterpå.', 4000);
+  };
+  ws.onclose = e => {
+    if (live.ws !== ws || !live.on) return;
+    if (!live.setupDone && live.ai < live.attempts.length - 1 && e.code !== 1006) { live.ai++; openLiveSocket(); return; }
+    const why = e.code === 1006 && !live.setupDone ? 'Fikk ikke kontakt med AI-tjenesten.' : e.reason ? e.reason : 'Forbindelsen ble lukket.';
+    const quota = /quota|exhaust|rate/i.test(e.reason || '');
+    stopLive(); addMsg('sys', '⚠ ' + (quota ? 'Gratiskvoten for live-samtale er brukt opp for nå. Prøv igjen senere, eller bruk vanlig samtale under.' : why + ' Trykk på mikrofonen for å fortsette.'));
+  };
+}
+function stopLive() {
+  const was = live.on; live.on = false; live.setupDone = false;
+  try { live.ws?.close(); } catch { } live.ws = null;
+  stopPlayback();
+  live.stream?.getTracks().forEach(t => t.stop()); live.stream = null;
+  try { live.micCtx?.close(); } catch { } try { live.outCtx?.close(); } catch { }
+  live.micCtx = live.outCtx = live.node = null;
+  if (live.userB) flushUser(); if (live.botB) flushBot();
+  $('#liveBtn').style.setProperty('--lvl', 0);
+  setLiveState('', settings.lang === 'en' ? 'Tap to start a live conversation' : 'Trykk for å starte live-samtale');
+  if (was) saveTopics();
 }
 
 /* ---------- quiz ---------- */
@@ -679,10 +852,11 @@ function fillVoiceSelect() {
 }
 function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
+  $('#liveVoiceSel').innerHTML = LIVE_VOICES.map(v => `<option${v === (settings.liveVoice || 'Kore') ? ' selected' : ''}>${v}</option>`).join('');
   $('#builtinAi').textContent = PROXY ? '✅ Appen har innebygd AI – du trenger ikke egen nøkkel. Legg inn en egen bare hvis den innebygde kvoten er brukt opp.' : '';
   $('#settings').showModal();
 }
-$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; saveSettings(); renderTopics(); toast('Lagret'); };
+$('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; saveSettings(); renderTopics(); toast('Lagret'); };
 $('#testKey').onclick = async () => {
   const old = { ...settings }; settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim();
   $('#testOut').textContent = 'Tester …';
@@ -704,7 +878,13 @@ $('#installBtn').onclick = async () => {
 $('#backBtn').onclick = showHome;
 $('#settingsBtn').onclick = openSettings;
 document.addEventListener('click', e => { if (e.target.closest('[data-open-settings]')) openSettings(); });
-$('#langBtn').onclick = () => setLang(settings.lang === 'no' ? 'en' : 'no', true);
+$('#langBtn').onclick = () => {
+  setLang(settings.lang === 'no' ? 'en' : 'no', true);
+  if (live.on && live.setupDone && live.ws?.readyState === 1) live.ws.send(JSON.stringify({ realtimeInput: { text: settings.lang === 'en' ? '(Please switch to English now and keep speaking English.)' : '(Bytt til norsk nå og fortsett på norsk.)' } }));
+  else if (!live.on) stopLive();
+};
+$('#liveBtn').onclick = startLive;
+$('#liveStop').onclick = stopLive;
 $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: [], created: Date.now(), updated: Date.now(), chat: [], cache: {} }; topics.push(t); saveTopics(); openTopic(t, 'material'); $('#topicName').focus(); };
 $('#topicName').oninput = e => { cur.name = e.target.value.trim(); $('#title').textContent = cur.name || 'Nytt tema'; cur.updated = Date.now(); saveTopics(); };
 $$('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
