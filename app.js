@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.5.4';
+const VERSION = '1.5.5';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -477,7 +477,7 @@ addEventListener('scroll', () => {
 function follow(el, force) {
   if (force) userScrolledUp = false;
   if (userScrolledUp || touching) { if (userScrolledUp && !$('[data-pane=chat]').hidden) $('#newMsgBtn').hidden = false; return; }
-  el.scrollIntoView({ block: 'end' });
+  scrollTo(0, document.documentElement.scrollHeight);
 }
 function addMsg(role, text, force) {
   const d = document.createElement('div'); d.className = 'msg ' + role; d.textContent = text;
