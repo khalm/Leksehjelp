@@ -290,3 +290,7 @@ dialog::backdrop{background:rgba(10,14,22,.5);backdrop-filter:blur(3px)}
 @media (prefers-color-scheme: dark){.podline.guest b{color:var(--accent)}}
 .podline.speaking{box-shadow:0 0 0 2px var(--accent)}
 a.btn{text-decoration:none}
+
+table.speed{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:10px}
+table.speed th,table.speed td{text-align:left;padding:5px 4px;border-bottom:1px solid var(--line);word-break:break-word}
+table.speed th{color:var(--muted);font-weight:600}

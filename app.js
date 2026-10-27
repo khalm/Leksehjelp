@@ -1,6 +1,6 @@
 /* Leksehjelp – studer og pugg et tema basert på ditt eget stoff */
 'use strict';
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_DOC_CHARS = 400000;
 
@@ -73,7 +73,7 @@ function rankModels(list) {
   const usable = list.filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
     .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini/.test(n) && /flash/.test(n) && !bad.test(n));
   const ver = n => { const v = n.match(/gemini-(\d+(?:\.\d+)?)/); return v ? parseFloat(v[1]) : 0; };
-  const score = n => ver(n) * 100 - (/lite/.test(n) ? 30 : 0) - (/(preview|exp)/.test(n) ? 5 : 0) - (/-\d{3,}$/.test(n) ? 1 : 0) + (/latest/.test(n) ? 50 : 0);
+  const score = n => ver(n) * 100 - (/lite/.test(n) ? 30 : 0) - (/(preview|exp)/.test(n) ? 15 : 0) - (/-\d{3,}$/.test(n) ? 1 : 0) + (/latest/.test(n) ? 50 : 0);
   return usable.sort((a, b) => score(b) - score(a));
 }
 let rawModels = null;
@@ -145,50 +145,93 @@ async function readSSE(r, onText) {
   if (!full.trim()) throw new Error(blocked || 'Tomt svar fra AI.');
   return full;
 }
+/* Modeller som nettopp sa «opptatt» hoppes over en stund, og den som sist svarte raskt prøves først */
+const cooldown = {};             // modell -> tidspunkt den kan brukes igjen
+const fastModel = { main: null, lite: null }; // sist brukte modell som svarte (vanlig / lett)
+const reqLog = [];               // de siste forespørslene, for hastighetsmåleren
+function logReq(e) { reqLog.unshift({ t: Date.now(), ...e }); reqLog.length = Math.min(reqLog.length, 12); }
+function orderModels(list, lite = false) {
+  const now = Date.now(), pref = fastModel[lite ? 'lite' : 'main'];
+  const ok = list.filter(m => !(cooldown[m] > now)), busy = list.filter(m => cooldown[m] > now).sort((a, b) => cooldown[a] - cooldown[b]);
+  if (pref && ok.includes(pref)) ok.splice(ok.indexOf(pref), 1), ok.unshift(pref);
+  return [...ok, ...busy];
+}
+function markFast(m, lite) { if (lite) fastModel.lite = m; else if (!/lite/.test(m)) fastModel.main = m; }
+function retryDelayOf(msg) { const m = String(msg).match(/retry in ([\d.]+)s|"retryDelay":\s*"(\d+)s"/i); return m ? Math.ceil(+(m[1] || m[2]) * 1000) : 0; }
 async function gemini(parts, opts = {}) {
-  const { system = '', json = false, temp = 0.4, history = null, fast = false, onText = null, lite = false } = opts;
+  const { system = '', json = false, temp = 0.4, history = null, fast = false, onText = null, lite = false, what = '' } = opts;
   if (!hasKey()) throw new Error('NOKEY');
   const contents = history ? history : [{ role: 'user', parts: Array.isArray(parts) ? parts : [{ text: parts }] }];
   const body = { contents, generationConfig: { temperature: temp } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (json) body.generationConfig.responseMimeType = 'application/json';
-  const models = settings.model ? [settings.model] : lite ? await pickLiteModels() : await pickModels();
-  const stream = !!onText;
-  let lastErr;
-  for (const m of models) {
-    let useThink = fast;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const direct = !!settings.apiKey;
-      const gc = { ...body.generationConfig };
-      if (useThink) { const t = thinkCfg(m); if (t) gc.thinkingConfig = t; }
-      const url = direct
-        ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`
-        : `${PROXY}/${stream ? 'stream' : 'gemini'}/${encodeURIComponent(m)}`;
-      const r = await fetch(url, {
-        method: 'POST', headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, generationConfig: gc }),
-      }).catch(e => ({ ok: false, status: 0, _e: e }));
-      if (r.ok) {
-        if (stream) { const full = await readSSE(r, onText); return json ? parseJSON(full) : full.trim(); }
-        const d = await r.json();
-        const txt = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
-        if (!txt) throw new Error(d.promptFeedback?.blockReason ? 'Svaret ble blokkert av Google sitt filter.' : 'Tomt svar fra AI.');
-        if (!json) return txt;
-        return parseJSON(txt);
+  let base = settings.model ? [settings.model] : lite ? await pickLiteModels() : await pickModels();
+  // Siste utvei hvis alle de vanlige er opptatt: en lett modell (egen kvote)
+  if (!settings.model && !lite) { const l = (await pickLiteModels()).filter(m => /lite/.test(m) && !base.includes(m)); base = [...base, ...l.slice(0, 1)]; }
+  const stream = !!onText, t0 = performance.now();
+  let lastErr, tries = 0;
+  for (let round = 0; round < 2; round++) {
+    for (const m of orderModels(base, lite)) {
+      if (round === 0 && cooldown[m] > Date.now() && base.some(x => !(cooldown[x] > Date.now()))) continue;
+      let useThink = fast;
+      for (let again = 0; again < 2; again++) {
+        tries++;
+        const direct = !!settings.apiKey;
+        const gc = { ...body.generationConfig };
+        if (useThink) { const t = thinkCfg(m); if (t) gc.thinkingConfig = t; }
+        const url = direct
+          ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`
+          : `${PROXY}/${stream ? 'stream' : 'gemini'}/${encodeURIComponent(m)}`;
+        // Tidsgrense: gir opp og prøver neste modell hvis svaret ikke har startet
+        const ac = new AbortController(); let firstAt = 0;
+        const limit = stream ? (fast ? 20000 : 45000) : (fast ? 30000 : 60000);
+        let timer = setTimeout(() => ac.abort(), limit);
+        const r = await fetch(url, {
+          method: 'POST', signal: ac.signal, headers: direct ? { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey } : { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, generationConfig: gc }),
+        }).catch(e => ({ ok: false, status: e.name === 'AbortError' ? -1 : 0, _e: e }));
+        if (r.ok) {
+          try {
+            if (stream) {
+              const full = await readSSE(r, (f, t) => { if (!firstAt) { firstAt = performance.now(); clearTimeout(timer); timer = setTimeout(() => ac.abort(), 120000); } onText(f, t); });
+              clearTimeout(timer); markFast(m, lite);
+              logReq({ what, model: m, first: Math.round(firstAt - t0), total: Math.round(performance.now() - t0), tries, ok: true });
+              return json ? parseJSON(full) : full.trim();
+            }
+            const d = await r.json(); clearTimeout(timer);
+            const txt = (d.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
+            if (!txt) throw new Error(d.promptFeedback?.blockReason ? 'Svaret ble blokkert av Google sitt filter.' : 'Tomt svar fra AI.');
+            markFast(m, lite); const ms = Math.round(performance.now() - t0);
+            logReq({ what, model: m, first: ms, total: ms, tries, ok: true });
+            return json ? parseJSON(txt) : txt;
+          } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError' && !firstAt) { cooldown[m] = Date.now() + 30000; lastErr = new Error('AI-en brukte for lang tid.'); break; }
+            throw e;
+          }
+        }
+        clearTimeout(timer);
+        if (r.status === -1) { cooldown[m] = Date.now() + 30000; lastErr = new Error('AI-en brukte for lang tid. Prøv igjen.'); break; }
+        let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
+        if (stream && !direct && r.status === 403 && /Ikke tillatt/.test(msg)) { const t = await gemini(parts, { ...opts, onText: null }); onText(typeof t === 'string' ? t : JSON.stringify(t), ''); return t; }
+        if (r.status === 400 && useThink && /think/i.test(msg)) { useThink = false; continue; }
+        if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); modelCache = null; settings.autoModels = null; saveSettings(); break; }
+        if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under Innstillinger.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
+        if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
+        if (r.status === 429 || r.status === 503 || r.status === 500 || r.status === 0) {
+          // Ikke vent – hopp rett til neste modell (hver modell har sin egen gratiskvote)
+          const wait = r.status === 429 ? Math.max(retryDelayOf(msg), /per day|daily|PerDay/i.test(msg) ? 3600e3 : 60000) : 20000;
+          cooldown[m] = Date.now() + wait;
+          logReq({ what, model: m, status: r.status, tries, ok: false });
+          lastErr = new Error(r.status === 429 ? 'Gratiskvoten er brukt opp akkurat nå. Vent litt og prøv igjen.' : r.status === 0 ? 'Ingen nettforbindelse.' : 'Google er opptatt akkurat nå. Prøv igjen.');
+          if (r.status === 0) { await sleep(800); continue; }
+          break;
+        }
+        throw new Error(msg || ('Feil fra AI (' + r.status + ')'));
       }
-      let msg = ''; try { msg = (await r.json()).error?.message || ''; } catch { }
-      // Eldre proxy uten strømming → vanlig kall
-      if (stream && !direct && r.status === 403 && /Ikke tillatt/.test(msg)) { const t = await gemini(parts, { ...opts, onText: null }); onText(typeof t === 'string' ? t : JSON.stringify(t), ''); return t; }
-      if (r.status === 400 && useThink && /think/i.test(msg)) { useThink = false; attempt--; continue; }
-      if (r.status === 404) { lastErr = new Error('Modellen finnes ikke: ' + m); modelCache = null; settings.autoModels = null; saveSettings(); break; }
-      if (r.status === 400 && /API key/i.test(msg)) throw new Error(settings.apiKey ? 'API-nøkkelen er ugyldig. Sjekk den under Innstillinger.' : 'Den innebygde AI-nøkkelen virker ikke. Sjekk LEKSEHJELP_GEMINI_API_KEY.');
-      if (r.status === 403) throw new Error(msg || 'Ingen tilgang til AI-en.');
-      if (r.status === 429 || r.status === 503 || r.status === 500 || r.status === 0) {
-        lastErr = new Error(r.status === 429 ? 'Gratiskvoten er brukt opp akkurat nå. Vent litt og prøv igjen.' : r.status === 0 ? 'Ingen nettforbindelse.' : 'Google er opptatt akkurat nå. Prøv igjen.');
-        await sleep(1500 * (attempt + 1)); continue;
-      }
-      throw new Error(msg || ('Feil fra AI (' + r.status + ')'));
     }
+    if (round === 0) await sleep(1500); // alle var opptatt – én kort pause, så én runde til
   }
+  logReq({ what, model: '–', tries, ok: false, total: Math.round(performance.now() - t0) });
   throw lastErr || new Error('Ukjent feil');
 }
 function parseJSON(t) {
@@ -741,7 +784,7 @@ async function sendChat(text, { hidden = false } = {}) {
     if (hasKey()) {
       const hist = cur.chat.slice(-20).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
       reply = await gemini(null, {
-        history: hist, temp: 0.5, fast: true, onText,
+        history: hist, temp: 0.5, fast: true, onText, what: 'Samtale',
         system: groundRules() + `\nDette er en samtale (ofte muntlig). Svar kort og naturlig (2–5 setninger), som en god lærer. Still gjerne et lite oppfølgingsspørsmål for å sjekke forståelsen. Ikke bruk markdown, lister eller emojier – teksten leses høyt.\nHvis eleven ber deg bytte til engelsk, start svaret med [[EN]] og svar på engelsk. Ber eleven om norsk, start med [[NO]] og svar på norsk.`,
       });
       const m = reply.match(/^\s*\[\[(EN|NO)\]\]\s*/i);
@@ -778,7 +821,7 @@ async function renderSuggestions(force) {
   if (!hasKey() || !cur.sources.length || sugBusy) { box.innerHTML = ''; return; }
   sugBusy = true; box.innerHTML = `<span class="small muted"><span class="spin"></span>Finner forslag …</span>`;
   try {
-    const r = await gemini(`Foreslå 4 korte, varierte spørsmål (maks 8 ord hver) som en elev kan stille for å lære dette stoffet. Bland enkle «hva/hvem/når»-spørsmål med «hvorfor/hvordan»-spørsmål. Spørsmålene skal kunne besvares ut fra stoffet. ${settings.lang === 'en' ? 'Write them in English.' : 'Skriv på norsk bokmål.'} JSON: {"questions":["…"]}`, { system: groundRules(), json: true, temp: 0.9, fast: true, lite: true });
+    const r = await gemini(`Foreslå 4 korte, varierte spørsmål (maks 8 ord hver) som en elev kan stille for å lære dette stoffet. Bland enkle «hva/hvem/når»-spørsmål med «hvorfor/hvordan»-spørsmål. Spørsmålene skal kunne besvares ut fra stoffet. ${settings.lang === 'en' ? 'Write them in English.' : 'Skriv på norsk bokmål.'} JSON: {"questions":["…"]}`, { system: groundRules(), json: true, temp: 0.9, fast: true, lite: true, what: 'Forslag' });
     const qs = (r.questions || r || []).filter(x => typeof x === 'string').slice(0, 4);
     cur.cache ||= {}; cur.cache.suggest = qs; saveTopics(); draw(qs);
   } catch { box.innerHTML = ''; }
@@ -1043,7 +1086,7 @@ FORMAT: Skriv hvert spørsmål som ett JSON-objekt på ÉN linje (JSON Lines) �
   let seen = 0;
   const take = line => { line = line.trim().replace(/^```\w*|```$/g, '').replace(/,$/, '').trim(); if (!line.startsWith('{')) return; try { const q = normQ(JSON.parse(line)); if (q && gen.qs.length < count) { gen.qs.push(q); notify(); } } catch { } };
   gen.promise = gemini(prompt, {
-    system: groundRules(), temp: 0.7, fast: true,
+    system: groundRules(), temp: 0.7, fast: true, what: 'Quiz',
     onText: full => { const lines = full.split('\n'); for (; seen < lines.length - 1; seen++) take(lines[seen]); },
   }).then(full => {
     const lines = full.split('\n'); for (; seen < lines.length; seen++) take(lines[seen]);
@@ -1056,7 +1099,8 @@ FORMAT: Skriv hvert spørsmål som ett JSON-objekt på ÉN linje (JSON Lines) �
 function prefetchQuiz() {
   if (!cur?.sources.length || quiz || !hasKey()) return;
   if (quizGen && quizGen.key === quizKey() && !quizGen.error) return;
-  quizGen = makeQuizGen(null, 20);
+  if (Object.values(cooldown).some(t => t > Date.now())) return; // spar kvoten når Google er opptatt
+  quizGen = makeQuizGen(null, +segVal('quizCount'));
 }
 const quizTotal = () => quiz.gen.done ? Math.min(quiz.count, quiz.gen.qs.length) : quiz.count;
 async function startQuiz(focus = null) {
@@ -1167,7 +1211,7 @@ Spørsmål: ${q.question}
 Fasit: ${q.answer}${q.explanation ? '\nForklaring: ' + q.explanation : ''}${q.quote ? '\nFra stoffet: ' + q.quote : ''}
 Elevens svar: ${given}
 Er elevens svar riktig ifølge fasiten? Vær raus med stavefeil, synonymer, andre formuleringer og feilhørte ord fra talegjenkjenning. «delvis» hvis noe vesentlig mangler. ${settings.lang === 'en' ? 'Write the comment in English.' : 'Skriv kommentaren på norsk.'}
-JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, vennlig setning"}`, { json: true, temp: 0, fast: true, lite: true });
+JSON: {"verdict":"riktig"|"delvis"|"feil","comment":"én kort, vennlig setning"}`, { json: true, temp: 0, fast: true, lite: true, what: 'Retting' });
       verdict = r.verdict === 'riktig' ? 'ok' : r.verdict === 'delvis' ? 'part' : 'bad'; comment = r.comment || '';
     } else {
       const aw = words(q.answer).filter(w => !STOP.has(w)), gw = words(given);
@@ -1333,7 +1377,7 @@ ${POD_HOST.name}: …${dialog ? `\n${POD_GUEST.name}: …` : `\n${POD_HOST.name}
   let seen = 0;
   try {
     await gemini(prompt + fmt, {
-      system: groundRules(), temp: 0.9, fast: true,
+      system: groundRules(), temp: 0.9, fast: true, what: 'Podcast',
       onText: full => {
         if (my !== pod.token) return;
         const ls = full.split('\n');
@@ -1421,7 +1465,7 @@ async function makeLecture() {
     let t;
     if (hasKey()) t = await gemini(`Hold et engasjerende foredrag for en elev om studiestoffet, ca. ${wordsN} ord. Det skal leses høyt.
 Struktur: en kort innledning som sier hva foredraget handler om, deretter 3–6 deler med overskrift (# Overskrift) og korte avsnitt, og til slutt en oppsummering av de viktigste punktene å huske.
-Forklar sammenhenger og gjenta nøkkelbegreper så de fester seg. Bruk bare fakta fra stoffet. Ingen lister, bare avsnitt.`, { system: groundRules(), temp: 0.6, onText });
+Forklar sammenhenger og gjenta nøkkelbegreper så de fester seg. Bruk bare fakta fra stoffet. Ingen lister, bare avsnitt.`, { system: groundRules(), temp: 0.6, onText, what: 'Foredrag' });
     else t = '# Viktige punkter fra stoffet\n' + keySentences(docText(), Math.round(wordsN / 22)).join('\n\n');
     cur.cache.lecture = t; saveTopics();
     cancelAnimationFrame(raf); raf = 0; render(t); player.live = false;
@@ -1437,7 +1481,7 @@ async function makeSummary() {
     let t;
     if (hasKey()) {
       const how = { stikkord: 'Lag et sammendrag som stikkord: korte punkter (- ) gruppert under overskrifter (# ). Ta med alle viktige navn, årstall, begreper og tall.', kort: 'Lag et kort sammendrag på 1–3 avsnitt (maks ca. 200 ord) med det aller viktigste.', grundig: 'Lag et grundig sammendrag med overskrifter (# ) for hver del av stoffet, og avslutt med «# Viktige begreper» som en punktliste med forklaringer.' }[len];
-      t = await gemini(how + ' Bruk bare fakta fra stoffet, i samme rekkefølge som i stoffet.', { system: groundRules(), temp: 0.3, onText });
+      t = await gemini(how + ' Bruk bare fakta fra stoffet, i samme rekkefølge som i stoffet.', { system: groundRules(), temp: 0.3, onText, what: 'Sammendrag' });
     } else {
       const n = { stikkord: 8, kort: 5, grundig: 14 }[len];
       t = keySentences(docText(), n).map(s => (len === 'stikkord' ? '- ' : '') + s).join('\n\n');
@@ -1500,6 +1544,7 @@ function fillVoiceSelect() {
 }
 function openSettings() {
   $('#apiKey').value = settings.apiKey; $('#modelName').value = settings.model; $('#modelName').placeholder = 'Automatisk' + (modelCache ? ' (' + modelCache[0] + ')' : ''); fillVoiceSelect(); $('#testOut').textContent = '';
+  renderSpeed();
   $('#gameModeS').checked = !!settings.gameMode; $('#gameSoundS').checked = !!settings.gameSound;
   $('#textSize').value = settings.textSize || 1; $('#fontSel').value = settings.font || ''; $('#autoRead').checked = !!settings.autoRead;
   $('#liveVoiceSel').innerHTML = LIVE_VOICES.map(v => `<option${v === (settings.liveVoice || 'Kore') ? ' selected' : ''}>${v}</option>`).join('');
@@ -1507,6 +1552,20 @@ function openSettings() {
   $('#settings').showModal();
 }
 $('#saveSettings').onclick = () => { settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim(); settings.voice = $('#voiceSel').value; settings.liveVoice = $('#liveVoiceSel').value; settings.textSize = +$('#textSize').value; settings.font = $('#fontSel').value; settings.autoRead = $('#autoRead').checked; settings.gameMode = $('#gameModeS').checked; settings.gameSound = $('#gameSoundS').checked; syncGameToggles(); applyReading(); saveSettings(); renderTopics(); toast('Lagret'); };
+function renderSpeed() {
+  const fmt = ms => ms == null ? '–' : (ms / 1000).toFixed(1).replace('.', ',') + ' s';
+  const rows = reqLog.slice(0, 8).map(e => `<tr><td>${esc(e.what || 'Test')}</td><td>${esc(e.model)}</td><td>${e.ok ? fmt(e.first) : (e.status === 429 ? 'kvote brukt opp' : e.status === 503 ? 'opptatt' : e.status ? 'feil ' + e.status : 'feilet')}</td><td>${e.tries > 1 ? e.tries : ''}</td></tr>`).join('');
+  const busy = Object.entries(cooldown).filter(([, t]) => t > Date.now()).map(([m, t]) => `${esc(m)} (${Math.ceil((t - Date.now()) / 1000)} s)`).join(', ');
+  $('#speedOut').innerHTML = (rows ? `<table class="speed"><tr><th>Hva</th><th>Modell</th><th>Første svar</th><th>Forsøk</th></tr>${rows}</table>` : '<p class="small muted">Ingen målinger ennå.</p>') + (busy ? `<p class="small muted">Midlertidig opptatt: ${busy}</p>` : '');
+}
+$('#speedTest').onclick = async () => {
+  $('#speedTest').disabled = true; $('#speedOut').innerHTML = '<p class="small"><span class="spin"></span>Måler …</p>';
+  try {
+    await gemini('Svar bare med ordet: OK', { fast: true, what: 'Test (kort)' });
+    if (cur?.sources.length) await gemini('Svar med én setning: hva handler stoffet om?', { system: groundRules(), fast: true, onText: () => { }, what: 'Test (med stoff)' });
+  } catch { }
+  $('#speedTest').disabled = false; renderSpeed();
+};
 $('#testKey').onclick = async () => {
   const old = { ...settings }; settings.apiKey = $('#apiKey').value.trim(); settings.model = $('#modelName').value.trim();
   $('#testOut').textContent = 'Tester …';
@@ -1557,7 +1616,7 @@ $('#newTopicBtn').onclick = () => { const t = { id: uid(), name: '', sources: []
 $('#topicName').oninput = e => { cur.name = e.target.value.trim(); $('#title').textContent = cur.name || 'Nytt tema'; cur.updated = Date.now(); saveTopics(); };
 $$('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 $$('.seg').forEach(s => s.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('button', s).forEach(x => x.classList.toggle('on', x === b)); }));
-let prefT; $('#quizSetup').addEventListener('click', e => { if (e.target.closest('.seg')) { clearTimeout(prefT); prefT = setTimeout(prefetchQuiz, 700); } });
+let prefT; $('#quizSetup').addEventListener('click', e => { if (e.target.closest('.seg')) { clearTimeout(prefT); prefT = setTimeout(prefetchQuiz, 1500); } });
 $('#addCamera').onclick = () => $('#cameraInput').click();
 $('#addFile').onclick = () => $('#fileInput').click();
 $('#cameraInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
