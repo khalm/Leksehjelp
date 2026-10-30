@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=add,arrow_back,arrow_downward,auto_awesome,auto_stories,cancel,check_circle,close,co_present,content_copy,content_paste,delete,description,download,edit,edit_note,emoji_events,error,fact_check,forum,groups,lightbulb,link,local_fire_department,mic,open_in_new,pause,person,photo_camera,play_arrow,podcasts,quiz,record_voice_over,refresh,replay,search,send,skip_next,skip_previous,smartphone,speed,sports_esports,stars,stop,summarize,translate,travel_explore,tune,upload_file,volume_up&display=block">
-<link rel="stylesheet" href="style.css?v=1.11.0">
+<link rel="stylesheet" href="style.css?v=1.12.0">
 </head>
 <body>
 <header class="topbar">
@@ -36,6 +36,7 @@
       <button class="btn primary" type="submit">Søk</button>
     </form>
     <button id="newTopicBtn" class="btn wide"><span class="ms">add</span> Legg inn eget stoff</button>
+<div class="share-app-wrap" style="text-align:center;margin:18px 0 8px"><button type="button" class="share-app-btn" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:999px;border:1.5px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:15px;font-weight:700;cursor:pointer;opacity:.85"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg><span>Del appen med noen</span></button></div>
     <div class="row hero-foot">
       <button id="installBtn" class="btn ghost small" hidden><span class="ms">download</span> Installer app</button>
       <span class="version" id="versionLabel"></span>
@@ -317,7 +318,8 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="config.js?v=1.11.0"></script>
-<script src="app.js?v=1.11.0"></script>
+<script src="config.js?v=1.12.0"></script>
+<script src="app.js?v=1.12.0"></script>
+<script>/* Share this app */(function(){var NAME="Leksehjelp",TEXT="Leksehjelp hjelper deg \u00e5 l\u00e6re et tema: snakk med stoffet, ta quiz og f\u00e5 sammendrag.",URL0="https://khalm.github.io/Leksehjelp/",COPIED="Lenken er kopiert \u2013 lim den inn i en melding";function toast(m){var d=document.createElement('div');d.textContent=m;d.setAttribute('role','status');d.style.cssText='position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#222;color:#fff;padding:11px 18px;border-radius:14px;font:600 15px system-ui,sans-serif;z-index:2147483647;max-width:90%;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3)';document.body.appendChild(d);setTimeout(function(){d.remove()},3200)}window.shareThisApp=async function(){var url=/github\.io$/.test(location.hostname)?new URL('./',location.href).href:URL0;if(navigator.share){try{await navigator.share({title:NAME,text:TEXT,url:url});return}catch(e){if(e&&e.name==='AbortError')return}}try{await navigator.clipboard.writeText(TEXT+' '+url);toast(COPIED)}catch(e){window.prompt('',url)}};document.addEventListener('click',function(e){var b=e.target&&e.target.closest&&e.target.closest('.share-app-btn');if(b){e.preventDefault();window.shareThisApp()}})})();</script>
 </body>
 </html>
